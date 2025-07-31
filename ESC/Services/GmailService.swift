@@ -3,7 +3,7 @@ import SwiftData
 
 class GmailService: ObservableObject {
     private let baseURL = "https://gmail.googleapis.com/gmail/v1"
-    private let authManager = GoogleAuthManager()
+    private let authManager = GoogleAuthManager.shared
     
     var isAuthenticated: Bool {
         let authenticated = authManager.isAuthenticated
@@ -131,7 +131,7 @@ class GmailService: ObservableObject {
             recipient: recipient,
             recipientEmail: recipientEmail,
             body: body,
-            snippet: message.snippet ?? "",
+            snippet: MessageCleaner.createCleanSnippet(body),
             timestamp: timestamp,
             isRead: !(message.labelIds?.contains("UNREAD") ?? false),
             isFromMe: message.labelIds?.contains("SENT") ?? false

@@ -3,7 +3,12 @@ import SwiftData
 
 struct ConversationDetailView: View {
     let conversation: Conversation
+    @ObservedObject var gmailService: GmailService
+    @Environment(\.modelContext) private var modelContext
     @State private var messageText = ""
+    @State private var isSending = false
+    @State private var showingError = false
+    @State private var errorMessage = ""
     
     var body: some View {
         VStack(spacing: 0) {
@@ -21,6 +26,15 @@ struct ConversationDetailView: View {
                 }
                 .background(Color.white)
                 .onAppear {
+                    // Mark conversation as read when opened
+                    if !conversation.isRead {
+                        conversation.isRead = true
+                        for email in conversation.emails where !email.isRead {
+                            email.isRead = true
+                        }
+                        try? modelContext.save()
+                    }
+                    
                     if let lastEmail = conversation.sortedEmails.last {
                         proxy.scrollTo(lastEmail.id, anchor: .bottom)
                     }
@@ -33,13 +47,77 @@ struct ConversationDetailView: View {
         .background(Color.white)
         .navigationTitle(conversation.contactName)
         .navigationBarTitleDisplayMode(.inline)
+        .alert("Error", isPresented: $showingError) {
+            Button("OK") { }
+        } message: {
+            Text(errorMessage)
+        }
     }
     
     private func sendMessage() {
         guard !messageText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
         
-        // TODO: Implement sending email via Gmail API
-        messageText = ""
+        isSending = true
+        let messageBody = messageText
+        
+        Task {
+            do {
+                // Send via Gmail API if authenticated
+                if gmailService.isAuthenticated {
+                    try await gmailService.sendEmail(to: conversation.contactEmail, body: messageBody)
+                }
+                
+                // Create local email record
+                let email = Email(
+                    id: UUID().uuidString,
+                    messageId: UUID().uuidString,
+                    threadId: UUID().uuidString,
+                    sender: "Me",
+                    senderEmail: "me@example.com",
+                    recipient: conversation.contactName,
+                    recipientEmail: conversation.contactEmail,
+                    body: messageBody,
+                    snippet: MessageCleaner.createCleanSnippet(messageBody),
+                    timestamp: Date().addingTimeInterval(60),
+                    isRead: true,
+                    isFromMe: true
+                )
+                
+                await MainActor.run {
+                    // Add email to conversation
+                    conversation.addEmail(email)
+                    
+                    // Update conversation to ensure it moves to top
+                    // Use future timestamp to ensure sent messages always appear above new messages
+                    let sentTime = Date().addingTimeInterval(60)
+                    conversation.lastMessageTimestamp = sentTime
+                    
+                    // Update the email timestamp to match
+                    email.timestamp = sentTime
+                    conversation.lastMessageSnippet = MessageCleaner.createCleanSnippet(messageBody)
+                    conversation.isRead = true
+                    
+                    modelContext.insert(email)
+                    
+                    do {
+                        try modelContext.save()
+                        messageText = ""
+                        isSending = false
+                    } catch {
+                        isSending = false
+                        errorMessage = "Failed to save message: \(error.localizedDescription)"
+                        showingError = true
+                    }
+                }
+                
+            } catch {
+                await MainActor.run {
+                    isSending = false
+                    errorMessage = "Failed to send message: \(error.localizedDescription)"
+                    showingError = true
+                }
+            }
+        }
     }
 }
 
@@ -90,21 +168,36 @@ struct MessageInputView: View {
     let onSend: () -> Void
     
     var body: some View {
-        HStack(spacing: 12) {
-            TextField("Message", text: $messageText, axis: .vertical)
-                .textFieldStyle(RoundedBorderTextFieldStyle())
-                .lineLimit(1...4)
+        VStack(spacing: 0) {
+            Divider()
+                .background(Color.gray.opacity(0.3))
             
-            Button(action: onSend) {
-                Image(systemName: "arrow.up.circle.fill")
-                    .font(.title2)
-                    .foregroundColor(messageText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? .gray : .blue)
+            HStack(spacing: 8) {
+                // Text input
+                TextField("", text: $messageText, axis: .vertical)
+                    .textFieldStyle(PlainTextFieldStyle())
+                    .font(.body)
+                    .lineLimit(1...6)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                    .background(Color.gray.opacity(0.1))
+                    .cornerRadius(20)
+                    .frame(minHeight: 36)
+                
+                // Send button
+                if !messageText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    Button(action: onSend) {
+                        Image(systemName: "arrow.up.circle.fill")
+                            .font(.title2)
+                            .foregroundColor(.blue)
+                            .frame(width: 32, height: 32)
+                    }
+                }
             }
-            .disabled(messageText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 8)
+            .background(Color.white)
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 8)
-        .background(Color.white)
     }
 }
 
@@ -116,6 +209,6 @@ struct MessageInputView: View {
         lastMessageSnippet: "Hey, how are you?"
     )
     
-    ConversationDetailView(conversation: sampleConversation)
+    ConversationDetailView(conversation: sampleConversation, gmailService: GmailService())
         .modelContainer(for: [Conversation.self, Email.self], inMemory: true)
 }

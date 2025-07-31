@@ -1,5 +1,6 @@
 import SwiftUI
 import SwiftData
+import Contacts
 
 struct ComposeView: View {
     @Environment(\.dismiss) private var dismiss
@@ -16,6 +17,7 @@ struct ComposeView: View {
     
     @ObservedObject var gmailService: GmailService
     @Query private var conversations: [Conversation]
+    @StateObject private var contactsService = ContactsService()
     
     var body: some View {
         NavigationView {
@@ -51,7 +53,14 @@ struct ComposeView: View {
                         Spacer()
                         
                         Button(action: {
-                            // TODO: Add contact picker functionality
+                            Task {
+                                if contactsService.authorizationStatus != .authorized {
+                                    await contactsService.requestAccess()
+                                }
+                                if contactsService.authorizationStatus == .authorized {
+                                    await contactsService.fetchContacts()
+                                }
+                            }
                         }) {
                             Image(systemName: "plus.circle.fill")
                                 .font(.title2)
@@ -64,22 +73,19 @@ struct ComposeView: View {
                     // Contact suggestions
                     if isEditingTo && !filteredContacts.isEmpty {
                         VStack(spacing: 0) {
-                            ForEach(filteredContacts.prefix(3), id: \.email) { contact in
+                            ForEach(filteredContacts.prefix(5), id: \.email) { contact in
                                 Button(action: {
                                     toEmail = contact.email
                                     isEditingTo = false
                                     isToFieldFocused = false
                                 }) {
                                     HStack {
-                                        Circle()
-                                            .fill(Color.blue.gradient)
-                                            .frame(width: 32, height: 32)
-                                            .overlay(
-                                                Text(contact.name.prefix(1).uppercased())
-                                                    .font(.caption)
-                                                    .fontWeight(.semibold)
-                                                    .foregroundColor(.white)
-                                            )
+                                        ContactAvatarView(
+                                            email: contact.email,
+                                            name: contact.name,
+                                            contactsService: contactsService,
+                                            size: 32
+                                        )
                                         
                                         VStack(alignment: .leading, spacing: 2) {
                                             Text(contact.name)
@@ -97,7 +103,7 @@ struct ComposeView: View {
                                 }
                                 .buttonStyle(PlainButtonStyle())
                                 
-                                if contact.email != filteredContacts.prefix(3).last?.email {
+                                if contact.email != filteredContacts.prefix(5).last?.email {
                                     Divider()
                                         .padding(.leading, 60)
                                 }
@@ -124,20 +130,8 @@ struct ComposeView: View {
                         .background(Color.gray.opacity(0.3))
                     
                     HStack(spacing: 8) {
-                        // + button
-                        Button(action: {
-                            // TODO: Add attachment functionality
-                        }) {
-                            Image(systemName: "plus")
-                                .font(.title2)
-                                .foregroundColor(.gray)
-                                .frame(width: 32, height: 32)
-                                .background(Color.gray.opacity(0.1))
-                                .clipShape(Circle())
-                        }
-                        
                         // Text input
-                        TextField("Text Message", text: $messageText, axis: .vertical)
+                        TextField("", text: $messageText, axis: .vertical)
                             .textFieldStyle(PlainTextFieldStyle())
                             .font(.body)
                             .lineLimit(1...6)
@@ -147,43 +141,19 @@ struct ComposeView: View {
                             .cornerRadius(20)
                             .frame(minHeight: 36)
                         
-                        // Voice/Send button area
-                        HStack(spacing: 4) {
-                            if messageText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                                // Voice button
-                                Button(action: {
-                                    // TODO: Add voice recording
-                                }) {
-                                    Image(systemName: "waveform")
-                                        .font(.title2)
-                                        .foregroundColor(.gray)
-                                        .frame(width: 24, height: 24)
-                                }
-                                
-                                // Emoji button
-                                Button(action: {
-                                    // TODO: Add emoji picker
-                                }) {
-                                    Image(systemName: "face.smiling")
-                                        .font(.title2)
-                                        .foregroundColor(.gray)
-                                        .frame(width: 24, height: 24)
-                                }
-                            } else {
-                                // Send button
-                                Button(action: {
-                                    print("🚀 ComposeView: Send button tapped!")
-                                    sendMessage()
-                                }) {
-                                    Image(systemName: "arrow.up.circle.fill")
-                                        .font(.title2)
-                                        .foregroundColor(.blue)
-                                        .frame(width: 24, height: 24)
-                                }
-                                .disabled(isSending || toEmail.isEmpty)
+                        // Send button
+                        if !messageText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                            Button(action: {
+                                print("🚀 ComposeView: Send button tapped!")
+                                sendMessage()
+                            }) {
+                                Image(systemName: "arrow.up.circle.fill")
+                                    .font(.title2)
+                                    .foregroundColor(.blue)
+                                    .frame(width: 32, height: 32)
                             }
+                            .disabled(isSending || toEmail.isEmpty)
                         }
-                        .frame(minWidth: 56) // Ensure consistent width
                     }
                     .padding(.horizontal, 16)
                     .padding(.vertical, 8)
@@ -201,6 +171,16 @@ struct ComposeView: View {
                 // Auto-focus the To field when compose view appears
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
                     isToFieldFocused = true
+                }
+                
+                // Request contacts access and fetch contacts
+                Task {
+                    if contactsService.authorizationStatus == .notDetermined {
+                        await contactsService.requestAccess()
+                    }
+                    if contactsService.authorizationStatus == .authorized {
+                        await contactsService.fetchContacts()
+                    }
                 }
             }
             .toolbar {
@@ -273,8 +253,9 @@ struct ComposeView: View {
                     let conversation = findOrCreateConversation(for: toEmail, email: email)
                     conversation.addEmail(email)
                     
-                    // Use a slightly future timestamp to ensure it's definitely the newest
-                    let currentTime = Date().addingTimeInterval(1)
+                    // Use a future timestamp to ensure sent messages always appear at top
+                    // Adding 60 seconds ensures it's above any new incoming messages
+                    let currentTime = Date().addingTimeInterval(60)
                     print("💾 ComposeView: Updating conversation timestamp to: \(currentTime)")
                     conversation.lastMessageTimestamp = currentTime
                     conversation.lastMessageSnippet = MessageCleaner.createCleanSnippet(messageText)
@@ -345,7 +326,7 @@ struct ComposeView: View {
         let conversation = Conversation(
             contactName: extractNameFromEmail(email),
             contactEmail: email,
-            lastMessageTimestamp: Date().addingTimeInterval(1), // Use future time to ensure it appears at top
+            lastMessageTimestamp: Date().addingTimeInterval(60), // Use future time to ensure it appears at top
             lastMessageSnippet: emailObject.snippet,
             isRead: true
         )
@@ -355,15 +336,36 @@ struct ComposeView: View {
     }
     
     private func updateFilteredContacts() {
-        let allContacts = conversations.map { (name: $0.contactName, email: $0.contactEmail) }
+        let conversationContacts = conversations.map { (name: $0.contactName, email: $0.contactEmail) }
+        let addressBookContacts = contactsService.searchContacts(query: toEmail)
+        
+        // Combine and deduplicate contacts
+        var allContacts: [(name: String, email: String)] = []
+        var seenEmails = Set<String>()
+        
+        // Add conversation contacts first (recent/frequent)
+        for contact in conversationContacts {
+            if !seenEmails.contains(contact.email) {
+                allContacts.append(contact)
+                seenEmails.insert(contact.email)
+            }
+        }
+        
+        // Add address book contacts
+        for contact in addressBookContacts {
+            if !seenEmails.contains(contact.email) {
+                allContacts.append(contact)
+                seenEmails.insert(contact.email)
+            }
+        }
         
         if toEmail.isEmpty {
-            filteredContacts = Array(allContacts.prefix(3))
+            filteredContacts = Array(allContacts.prefix(5))
         } else {
             filteredContacts = allContacts.filter { contact in
                 contact.name.localizedCaseInsensitiveContains(toEmail) ||
                 contact.email.localizedCaseInsensitiveContains(toEmail)
-            }
+            }.prefix(5).map { $0 }
         }
     }
 }

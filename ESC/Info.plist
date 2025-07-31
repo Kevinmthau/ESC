@@ -17,5 +17,7 @@
 			</array>
 		</dict>
 	</array>
+	<key>NSContactsUsageDescription</key>
+	<string>ESC needs access to your contacts to help you compose messages to people in your address book.</string>
 </dict>
 </plist>

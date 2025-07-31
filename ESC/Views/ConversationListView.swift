@@ -6,22 +6,25 @@ struct ConversationListView: View {
     @Query(sort: \Conversation.lastMessageTimestamp, order: .reverse) 
     private var conversations: [Conversation]
     @StateObject private var gmailService = GmailService()
-    @State private var isLoading = false
+    @State private var syncService: DataSyncService?
     @State private var showingAuth = false
     @State private var showingCompose = false
     @State private var errorMessage: String?
+    @StateObject private var contactsService = ContactsService()
     
     var body: some View {
         NavigationView {
-            Group {
-                if isLoading {
+            ZStack {
+                // Main content
+                VStack {
+                if syncService?.isSyncing == true && conversations.isEmpty {
                     ProgressView("Loading emails...")
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                         .background(Color.white)
                 } else {
                     List(displayConversations) { conversation in
-                        NavigationLink(destination: ConversationDetailView(conversation: conversation)) {
-                            ConversationRowView(conversation: conversation)
+                        NavigationLink(destination: ConversationDetailView(conversation: conversation, gmailService: gmailService)) {
+                            ConversationRowView(conversation: conversation, contactsService: contactsService)
                         }
                         .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
                         .listRowSeparator(.hidden)
@@ -29,13 +32,31 @@ struct ConversationListView: View {
                     }
                     .listStyle(PlainListStyle())
                     .background(Color.white)
+                    .refreshable {
+                        if gmailService.isAuthenticated {
+                            await syncService?.syncData()
+                        }
+                    }
                 }
-            }
-            .navigationTitle("Messages")
-            .navigationBarTitleDisplayMode(.large)
-            .background(Color.white)
+                }
+                }
+                .navigationTitle("Messages")
+                .navigationBarTitleDisplayMode(.large)
+                .background(Color.white)
             .toolbar {
                 ToolbarItem(placement: .navigationBarLeading) {
+                    if !gmailService.isAuthenticated {
+                        Button(action: {
+                            showingAuth = true
+                        }) {
+                            Image(systemName: "person.crop.circle.badge.plus")
+                                .font(.title2)
+                                .foregroundColor(.blue)
+                        }
+                    }
+                }
+                
+                ToolbarItem(placement: .navigationBarTrailing) {
                     Button(action: {
                         showingCompose = true
                     }) {
@@ -43,36 +64,33 @@ struct ConversationListView: View {
                             .font(.title2)
                     }
                 }
-                
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    Button(action: {
-                        if gmailService.isAuthenticated {
-                            Task {
-                                await loadGmailData()
-                            }
-                        } else {
-                            showingAuth = true
-                        }
-                    }) {
-                        Image(systemName: gmailService.isAuthenticated ? "arrow.clockwise" : "person.crop.circle.badge.plus")
-                    }
-                }
             }
             .onAppear {
+                // Initialize sync service if needed
+                if syncService == nil {
+                    syncService = DataSyncService(modelContext: modelContext, gmailService: gmailService)
+                }
+                
                 if gmailService.isAuthenticated {
-                    Task {
-                        await loadGmailData()
-                    }
+                    syncService?.startAutoSync()
                 } else {
                     loadSampleDataIfNeeded()
                 }
+                
+                // Load contacts for photo display
+                Task {
+                    if contactsService.authorizationStatus == .authorized {
+                        await contactsService.fetchContacts()
+                    }
+                }
+            }
+            .onDisappear {
+                syncService?.stopAutoSync()
             }
             .sheet(isPresented: $showingAuth) {
                 AuthenticationView(gmailService: gmailService) {
                     showingAuth = false
-                    Task {
-                        await loadGmailData()
-                    }
+                    syncService?.startAutoSync()
                 }
             }
             .sheet(isPresented: $showingCompose) {
@@ -108,63 +126,22 @@ struct ConversationListView: View {
         }
     }
     
-    private func loadGmailData() async {
-        await MainActor.run {
-            isLoading = true
-            errorMessage = nil
-        }
-        
-        do {
-            let emails = try await gmailService.fetchEmails()
-            let gmailConversations = gmailService.createConversations(from: emails)
-            
-            await MainActor.run {
-                // Clear existing data
-                for conversation in conversations {
-                    modelContext.delete(conversation)
-                }
-                
-                // Insert new Gmail data
-                for conversation in gmailConversations {
-                    modelContext.insert(conversation)
-                    for email in conversation.emails {
-                        modelContext.insert(email)
-                    }
-                }
-                
-                do {
-                    try modelContext.save()
-                } catch {
-                    errorMessage = "Failed to save Gmail data: \(error.localizedDescription)"
-                }
-                
-                isLoading = false
-            }
-        } catch {
-            await MainActor.run {
-                errorMessage = "Failed to load Gmail data: \(error.localizedDescription)"
-                isLoading = false
-            }
-        }
-    }
 }
 
 struct ConversationRowView: View {
     let conversation: Conversation
+    let contactsService: ContactsService
     
     var body: some View {
         VStack(spacing: 0) {
             HStack(spacing: 12) {
-                // Avatar circle
-                Circle()
-                    .fill(Color.blue.gradient)
-                    .frame(width: 50, height: 50)
-                    .overlay(
-                        Text(conversation.contactName.prefix(1).uppercased())
-                            .font(.title2)
-                            .fontWeight(.semibold)
-                            .foregroundColor(.white)
-                    )
+                // Avatar with contact photo
+                ContactAvatarView(
+                    email: conversation.contactEmail,
+                    name: conversation.contactName,
+                    contactsService: contactsService,
+                    size: 50
+                )
                 
                 VStack(alignment: .leading, spacing: 4) {
                     HStack {
@@ -208,6 +185,7 @@ struct ConversationRowView: View {
         .background(Color.white)
     }
 }
+
 
 #Preview {
     ConversationListView()

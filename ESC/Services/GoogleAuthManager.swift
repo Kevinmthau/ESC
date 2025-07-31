@@ -4,6 +4,8 @@ import SafariServices
 import UIKit
 
 class GoogleAuthManager: NSObject, ObservableObject {
+    static let shared = GoogleAuthManager()
+    
     @Published var isAuthenticated = false
     @Published var accessToken: String?
     @Published var refreshToken: String?
@@ -20,17 +22,16 @@ class GoogleAuthManager: NSObject, ObservableObject {
     private let refreshTokenKey = "GoogleAuth.RefreshToken"
     private let isAuthenticatedKey = "GoogleAuth.IsAuthenticated"
     
-    override init() {
+    private override init() {
         super.init()
         loadStoredTokens()
     }
     
+    @MainActor
     func authenticate() async throws {
         return try await withCheckedThrowingContinuation { continuation in
-            DispatchQueue.main.async { [weak self] in
-                self?.startAuthFlow { result in
-                    continuation.resume(with: result)
-                }
+            self.startAuthFlow { result in
+                continuation.resume(with: result)
             }
         }
     }
@@ -135,6 +136,7 @@ class GoogleAuthManager: NSObject, ObservableObject {
         await MainActor.run {
             self.accessToken = tokenResponse.accessToken
             self.refreshToken = tokenResponse.refreshToken
+            self.isAuthenticated = true
             print("🔑 GoogleAuthManager: Tokens received - access token: \(tokenResponse.accessToken.prefix(20))...")
             print("🔑 GoogleAuthManager: Setting isAuthenticated to true")
             self.saveTokens()
@@ -173,6 +175,7 @@ class GoogleAuthManager: NSObject, ObservableObject {
             if let newRefreshToken = tokenResponse.refreshToken {
                 self.refreshToken = newRefreshToken
             }
+            self.isAuthenticated = true
             self.saveTokens()
         }
     }
@@ -198,8 +201,9 @@ class GoogleAuthManager: NSObject, ObservableObject {
             print("🔑 GoogleAuthManager: Found stored access token: \(token.prefix(20))...")
         }
         
-        // If we have tokens but they might be expired, try to refresh
-        if isAuthenticated && accessToken != nil && refreshToken != nil {
+        // If we have tokens, try to validate and refresh them
+        if accessToken != nil && refreshToken != nil {
+            print("🔑 GoogleAuthManager: Found stored tokens, attempting to refresh...")
             Task {
                 do {
                     try await refreshAccessToken()
@@ -211,6 +215,10 @@ class GoogleAuthManager: NSObject, ObservableObject {
                     }
                 }
             }
+        } else if accessToken != nil {
+            // We have an access token but no refresh token - consider it valid for now
+            print("🔑 GoogleAuthManager: Found access token without refresh token, marking as authenticated")
+            self.isAuthenticated = true
         }
     }
     

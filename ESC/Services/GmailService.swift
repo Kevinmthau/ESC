@@ -11,6 +11,11 @@ class GmailService: ObservableObject {
         return authenticated
     }
     
+    func signOut() {
+        authManager.signOut()
+        print("✅ GmailService: User signed out")
+    }
+    
     // MARK: - Authentication
     
     func authenticate() async throws {
@@ -47,15 +52,22 @@ class GmailService: ObservableObject {
             throw GmailError.invalidURL
         }
         
+        guard let token = accessToken else {
+            throw GmailError.notAuthenticated
+        }
+        
         var request = URLRequest(url: url)
-        request.setValue("Bearer \(accessToken!)", forHTTPHeaderField: "Authorization")
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         
         do {
             let (data, response) = try await URLSession.shared.data(for: request)
             
             if let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 401 {
                 try await authManager.refreshAccessToken()
-                request.setValue("Bearer \(accessToken!)", forHTTPHeaderField: "Authorization")
+                guard let refreshedToken = accessToken else {
+                    throw GmailError.notAuthenticated
+                }
+                request.setValue("Bearer \(refreshedToken)", forHTTPHeaderField: "Authorization")
                 let (retryData, _) = try await URLSession.shared.data(for: request)
                 let messageResponse = try JSONDecoder().decode(MessageListResponse.self, from: retryData)
                 return messageResponse.messages?.map { $0.id } ?? []
@@ -73,15 +85,22 @@ class GmailService: ObservableObject {
             throw GmailError.invalidURL
         }
         
+        guard let token = accessToken else {
+            throw GmailError.notAuthenticated
+        }
+        
         var request = URLRequest(url: url)
-        request.setValue("Bearer \(accessToken!)", forHTTPHeaderField: "Authorization")
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         
         do {
             let (data, response) = try await URLSession.shared.data(for: request)
             
             if let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 401 {
                 try await authManager.refreshAccessToken()
-                request.setValue("Bearer \(accessToken!)", forHTTPHeaderField: "Authorization")
+                guard let refreshedToken = accessToken else {
+                    throw GmailError.notAuthenticated
+                }
+                request.setValue("Bearer \(refreshedToken)", forHTTPHeaderField: "Authorization")
                 let (retryData, _) = try await URLSession.shared.data(for: request)
                 let message = try JSONDecoder().decode(GmailMessage.self, from: retryData)
                 return parseGmailMessage(message)
@@ -120,7 +139,7 @@ class GmailService: ObservableObject {
         // Extract body
         body = extractBody(from: payload)
         
-        let timestamp = Date(timeIntervalSince1970: TimeInterval(message.internalDate ?? "0") ?? 0 / 1000)
+        let timestamp = Date(timeIntervalSince1970: (TimeInterval(message.internalDate ?? "0") ?? 0) / 1000)
         
         return Email(
             id: message.id,
@@ -360,20 +379,27 @@ class GmailService: ObservableObject {
         }
     }
     
-    private func getUserEmail() async throws -> String {
+    func getUserEmail() async throws -> String {
         guard let url = URL(string: "\(baseURL)/users/me/profile") else {
             throw GmailError.invalidURL
         }
         
+        guard let token = accessToken else {
+            throw GmailError.notAuthenticated
+        }
+        
         var request = URLRequest(url: url)
-        request.setValue("Bearer \(accessToken!)", forHTTPHeaderField: "Authorization")
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         
         do {
             let (data, response) = try await URLSession.shared.data(for: request)
             
             if let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 401 {
                 try await authManager.refreshAccessToken()
-                request.setValue("Bearer \(accessToken!)", forHTTPHeaderField: "Authorization")
+                guard let refreshedToken = accessToken else {
+                    throw GmailError.notAuthenticated
+                }
+                request.setValue("Bearer \(refreshedToken)", forHTTPHeaderField: "Authorization")
                 let (retryData, _) = try await URLSession.shared.data(for: request)
                 let profile = try JSONDecoder().decode(GmailProfile.self, from: retryData)
                 return profile.emailAddress

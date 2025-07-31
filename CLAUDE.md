@@ -60,11 +60,19 @@ xcodebuild test -project ESC.xcodeproj -scheme ESC -destination 'platform=iOS Si
 ### Services (`ESC/Services/`)
 - `GmailService.swift`: Complete Gmail API integration with authentication, fetching, and sending
 - `GoogleAuthManager.swift`: OAuth 2.0 flow using native iOS AuthenticationServices
+- `DataSyncService.swift`: Background sync service with timer-based polling (10-second intervals)
+- `ContactsService.swift`: iOS Contacts integration with photo caching and name resolution
+
+### Utilities (`ESC/Utils/`)
+- `MessageCleaner.swift`: Email content cleaning to remove quoted text and signatures
+
+### Additional Views
+- `ContactAvatarView.swift`: Contact photo display with fallback to initials
+- `SettingsView.swift`: Account management with sign-out and data deletion
 
 ### Configuration Files
 - `GoogleService-Info.plist`: Google API credentials and project configuration
 - `Info.plist`: URL schemes for OAuth redirects
-- `SampleData.swift`: Fallback test data when not authenticated
 
 ## Gmail API Integration
 
@@ -81,10 +89,11 @@ xcodebuild test -project ESC.xcodeproj -scheme ESC -destination 'platform=iOS Si
 - **Base64 Decoding**: Handles Gmail's URL-safe base64 encoding for message content
 
 ### Data Flow
-1. **Authentication**: User taps + icon to authenticate or refresh data
-2. **Data Sync**: Authenticated users get live Gmail data, others see sample data
-3. **Compose Flow**: New messages send via Gmail API and update local conversation list
+1. **Authentication**: User taps settings icon to authenticate or manages accounts
+2. **Data Sync**: DataSyncService polls Gmail API every 10 seconds for new messages
+3. **Compose Flow**: New messages send via Gmail API and immediately navigate to chat view
 4. **Threading**: All messages to/from same contact appear in single conversation
+5. **Contact Integration**: Names resolved from address book, photos cached for performance
 
 ## UI Design Patterns
 
@@ -96,10 +105,16 @@ xcodebuild test -project ESC.xcodeproj -scheme ESC -destination 'platform=iOS Si
 - **Contact Suggestions**: Dropdown with avatars when typing in To: field
 
 ### Navigation Flow
-- **Main List**: Conversations sorted by last message timestamp
-- **Compose**: Modal sheet with cancel/send, automatically closes on send
+- **Main List**: Conversations sorted by last message timestamp with NavigationStack
+- **Compose**: Modal sheet with cancel/send, navigates to chat view after sending
 - **Chat View**: Full-screen conversation with navigation back button
 - **Authentication**: Modal sheet for Google sign-in
+- **Settings**: Modal sheet with account management options
+
+### Modern Navigation Architecture
+- Uses `NavigationStack` with `NavigationPath` for iOS 16+ programmatic navigation
+- Compose flow navigates directly to conversation after sending message
+- Messages appear immediately in chat without requiring refresh
 
 ## Development Setup
 
@@ -108,10 +123,11 @@ xcodebuild test -project ESC.xcodeproj -scheme ESC -destination 'platform=iOS Si
 - URL schemes set up in `Info.plist` for OAuth redirects
 - No external package dependencies - uses native iOS frameworks only
 
-### Sample Data Fallback
-- Automatically loads realistic sample conversations when database is empty
-- Provides testing environment when not authenticated with Gmail
-- Sample data demonstrates proper conversation threading and message styling
+### iOS Contacts Integration
+- Requests permission for address book access on first use
+- Caches contact photos for performance
+- Falls back to initials in colored circles when photos unavailable
+- Name resolution priority: Address book > Gmail headers > formatted email username
 
 ## SwiftData Configuration
 
@@ -126,4 +142,24 @@ The app uses a shared ModelContainer configured in `ESCApp.swift` with:
 - Unit tests use new Swift Testing framework
 - UI tests include launch performance testing
 - Preview providers use in-memory data containers
-- Sample data provides realistic testing scenarios without API dependencies
+- Testing without authentication falls back to empty state (sample data removed)
+
+## Key Implementation Details
+
+### Message Composition Flow
+- ComposeView accepts `onMessageSent` callback for navigation handling
+- After sending, automatically navigates to conversation detail view
+- Messages appear immediately in local storage before Gmail API confirmation
+- Uses modern NavigationStack pattern for programmatic navigation
+
+### Background Sync Architecture
+- DataSyncService runs on 10-second timer when authenticated
+- Silent background sync prevents UI interruption
+- Conversation timestamps drive automatic sorting
+- New message notifications available via NotificationCenter
+
+### Contact Photo System
+- ContactAvatarView handles photo loading and caching
+- Fallback initials use first letter of display name
+- Photo cache prevents repeated iOS Contacts API calls
+- Circular cropping with gradient backgrounds for consistency

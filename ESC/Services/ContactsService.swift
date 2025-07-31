@@ -52,8 +52,12 @@ class ContactsService: ObservableObject {
                 }
             }
             
+            let sortedContacts = fetchedContacts.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+            
             await MainActor.run {
-                self.contacts = fetchedContacts.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+                self.contacts = sortedContacts
+                print("✅ ContactsService: Fetched \(self.contacts.count) contacts")
+                print("📧 ContactsService: Email mapping has \(self.emailToContactMap.count) entries")
             }
             
         } catch {
@@ -86,5 +90,16 @@ class ContactsService: ObservableObject {
         // Cache the photo
         contactPhotoCache[email] = image
         return image
+    }
+    
+    func getContactName(for email: String) -> String? {
+        guard let contact = emailToContactMap[email] else { 
+            print("🔍 ContactsService: No contact found for email: \(email)")
+            return nil 
+        }
+        let fullName = "\(contact.givenName) \(contact.familyName)".trimmingCharacters(in: .whitespaces)
+        let result = fullName.isEmpty ? nil : fullName
+        print("✅ ContactsService: Found name '\(result ?? "nil")' for email: \(email)")
+        return result
     }
 }

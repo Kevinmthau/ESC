@@ -9,6 +9,7 @@ struct ConversationDetailView: View {
     @State private var isSending = false
     @State private var showingError = false
     @State private var errorMessage = ""
+    @State private var scrollToId: String?
     
     var body: some View {
         VStack(spacing: 0) {
@@ -37,6 +38,14 @@ struct ConversationDetailView: View {
                     
                     if let lastEmail = conversation.sortedEmails.last {
                         proxy.scrollTo(lastEmail.id, anchor: .bottom)
+                    }
+                }
+                .onChange(of: scrollToId) { _, newValue in
+                    if let id = newValue {
+                        withAnimation {
+                            proxy.scrollTo(id, anchor: .bottom)
+                        }
+                        scrollToId = nil
                     }
                 }
             }
@@ -78,23 +87,16 @@ struct ConversationDetailView: View {
                     recipientEmail: conversation.contactEmail,
                     body: messageBody,
                     snippet: MessageCleaner.createCleanSnippet(messageBody),
-                    timestamp: Date().addingTimeInterval(60),
+                    timestamp: Date(),
                     isRead: true,
                     isFromMe: true
                 )
                 
                 await MainActor.run {
-                    // Add email to conversation
+                    // Add email to conversation (this updates timestamp and snippet)
                     conversation.addEmail(email)
                     
-                    // Update conversation to ensure it moves to top
-                    // Use future timestamp to ensure sent messages always appear above new messages
-                    let sentTime = Date().addingTimeInterval(60)
-                    conversation.lastMessageTimestamp = sentTime
-                    
-                    // Update the email timestamp to match
-                    email.timestamp = sentTime
-                    conversation.lastMessageSnippet = MessageCleaner.createCleanSnippet(messageBody)
+                    // Mark conversation as read
                     conversation.isRead = true
                     
                     modelContext.insert(email)
@@ -103,6 +105,8 @@ struct ConversationDetailView: View {
                         try modelContext.save()
                         messageText = ""
                         isSending = false
+                        // Trigger scroll to the new message
+                        scrollToId = email.id
                     } catch {
                         isSending = false
                         errorMessage = "Failed to save message: \(error.localizedDescription)"

@@ -180,13 +180,6 @@ class GoogleAuthManager: NSObject, ObservableObject {
         }
     }
     
-    func signOut() {
-        accessToken = nil
-        refreshToken = nil
-        isAuthenticated = false
-        clearStoredTokens()
-    }
-    
     // MARK: - Persistent Storage
     
     private func loadStoredTokens() {
@@ -230,6 +223,14 @@ class GoogleAuthManager: NSObject, ObservableObject {
         userDefaults.set(isAuthenticated, forKey: isAuthenticatedKey)
         
         print("🔑 GoogleAuthManager: Saved authentication state to UserDefaults")
+    }
+    
+    func signOut() {
+        accessToken = nil
+        refreshToken = nil
+        isAuthenticated = false
+        clearStoredTokens()
+        print("✅ GoogleAuthManager: User signed out successfully")
     }
     
     private func clearStoredTokens() {

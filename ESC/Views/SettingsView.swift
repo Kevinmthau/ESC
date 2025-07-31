@@ -1,0 +1,186 @@
+import SwiftUI
+import SwiftData
+
+struct SettingsView: View {
+    @Environment(\.dismiss) private var dismiss
+    @Environment(\.modelContext) private var modelContext
+    @ObservedObject var gmailService: GmailService
+    let syncService: DataSyncService?
+    let onAuthChange: (() -> Void)?
+    @State private var showingDeleteConfirmation = false
+    @State private var showingSignOutConfirmation = false
+    @State private var showingAuth = false
+    @State private var userEmail: String = ""
+    
+    init(gmailService: GmailService, syncService: DataSyncService? = nil, onAuthChange: (() -> Void)? = nil) {
+        self.gmailService = gmailService
+        self.syncService = syncService
+        self.onAuthChange = onAuthChange
+    }
+    
+    var body: some View {
+        NavigationView {
+            List {
+                // Account Section
+                Section("Account") {
+                    if gmailService.isAuthenticated {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Signed in as:")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                            Text(userEmail.isEmpty ? "Loading..." : userEmail)
+                                .font(.headline)
+                        }
+                        .padding(.vertical, 4)
+                        
+                        Button(action: {
+                            showingSignOutConfirmation = true
+                        }) {
+                            HStack {
+                                Image(systemName: "person.crop.circle.badge.minus")
+                                    .foregroundColor(.blue)
+                                Text("Switch Account")
+                                    .foregroundColor(.blue)
+                            }
+                        }
+                        
+                        Button(action: {
+                            showingDeleteConfirmation = true
+                        }) {
+                            HStack {
+                                Image(systemName: "trash.circle.fill")
+                                    .foregroundColor(.red)
+                                Text("Delete Account Data")
+                                    .foregroundColor(.red)
+                            }
+                        }
+                    } else {
+                        Button(action: {
+                            showingAuth = true
+                        }) {
+                            HStack {
+                                Image(systemName: "person.crop.circle.badge.plus")
+                                    .foregroundColor(.blue)
+                                Text("Sign In with Google")
+                                    .foregroundColor(.blue)
+                            }
+                        }
+                    }
+                }
+                
+                // App Info Section
+                Section("About") {
+                    HStack {
+                        Text("Version")
+                        Spacer()
+                        Text("1.0.0")
+                            .foregroundColor(.secondary)
+                    }
+                    
+                    HStack {
+                        Text("App Name")
+                        Spacer()
+                        Text("ESC - Email Simplified & Clean")
+                            .foregroundColor(.secondary)
+                    }
+                }
+            }
+            .navigationTitle("Settings")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button("Done") {
+                        dismiss()
+                    }
+                }
+            }
+        }
+        .sheet(isPresented: $showingAuth) {
+            AuthenticationView(gmailService: gmailService) {
+                showingAuth = false
+                loadUserEmail()
+                onAuthChange?()
+            }
+        }
+        .alert("Delete Account Data", isPresented: $showingDeleteConfirmation) {
+            Button("Cancel", role: .cancel) { }
+            Button("Delete", role: .destructive) {
+                deleteAccountData()
+            }
+        } message: {
+            Text("This will permanently delete all your local email data and sign you out. This action cannot be undone.")
+        }
+        .alert("Switch Account", isPresented: $showingSignOutConfirmation) {
+            Button("Cancel", role: .cancel) { }
+            Button("Sign Out", role: .destructive) {
+                signOutAndSwitchAccount()
+            }
+        } message: {
+            Text("This will sign you out and allow you to sign in with a different Google account. Your local data will be preserved.")
+        }
+        .onAppear {
+            loadUserEmail()
+        }
+    }
+    
+    private func loadUserEmail() {
+        if gmailService.isAuthenticated {
+            Task {
+                do {
+                    let email = try await gmailService.getUserEmail()
+                    await MainActor.run {
+                        userEmail = email
+                    }
+                } catch {
+                    print("❌ SettingsView: Failed to get user email: \(error)")
+                }
+            }
+        }
+    }
+    
+    private func deleteAccountData() {
+        Task { @MainActor in
+            do {
+                // Stop sync service first
+                syncService?.stopAutoSync()
+                
+                // Delete all emails
+                let emails = try modelContext.fetch(FetchDescriptor<Email>())
+                for email in emails {
+                    modelContext.delete(email)
+                }
+                
+                // Delete all conversations
+                let conversations = try modelContext.fetch(FetchDescriptor<Conversation>())
+                for conversation in conversations {
+                    modelContext.delete(conversation)
+                }
+                
+                try modelContext.save()
+                
+                // Sign out from Gmail
+                gmailService.signOut()
+                
+                print("✅ SettingsView: Successfully deleted all account data")
+                dismiss()
+                
+            } catch {
+                print("❌ SettingsView: Failed to delete account data: \(error)")
+            }
+        }
+    }
+    
+    private func signOutAndSwitchAccount() {
+        // Stop sync service first
+        syncService?.stopAutoSync()
+        
+        gmailService.signOut()
+        userEmail = ""
+        showingAuth = true
+    }
+}
+
+#Preview {
+    SettingsView(gmailService: GmailService(), syncService: nil, onAuthChange: nil)
+        .modelContainer(for: [Conversation.self, Email.self], inMemory: true)
+}

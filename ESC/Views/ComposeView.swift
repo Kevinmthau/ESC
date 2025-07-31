@@ -19,6 +19,13 @@ struct ComposeView: View {
     @Query private var conversations: [Conversation]
     @StateObject private var contactsService = ContactsService()
     
+    let onMessageSent: ((Conversation) -> Void)?
+    
+    init(gmailService: GmailService, onMessageSent: ((Conversation) -> Void)? = nil) {
+        self.gmailService = gmailService
+        self.onMessageSent = onMessageSent
+    }
+    
     var body: some View {
         NavigationView {
             VStack(spacing: 0) {
@@ -55,7 +62,7 @@ struct ComposeView: View {
                         Button(action: {
                             Task {
                                 if contactsService.authorizationStatus != .authorized {
-                                    await contactsService.requestAccess()
+                                    _ = await contactsService.requestAccess()
                                 }
                                 if contactsService.authorizationStatus == .authorized {
                                     await contactsService.fetchContacts()
@@ -176,7 +183,7 @@ struct ComposeView: View {
                 // Request contacts access and fetch contacts
                 Task {
                     if contactsService.authorizationStatus == .notDetermined {
-                        await contactsService.requestAccess()
+                        _ = await contactsService.requestAccess()
                     }
                     if contactsService.authorizationStatus == .authorized {
                         await contactsService.fetchContacts()
@@ -251,18 +258,14 @@ struct ComposeView: View {
                     
                     // Find or create conversation
                     let conversation = findOrCreateConversation(for: toEmail, email: email)
+                    
+                    // Add email to conversation (this updates timestamp and snippet)
                     conversation.addEmail(email)
                     
-                    // Use a future timestamp to ensure sent messages always appear at top
-                    // Adding 60 seconds ensures it's above any new incoming messages
-                    let currentTime = Date().addingTimeInterval(60)
-                    print("💾 ComposeView: Updating conversation timestamp to: \(currentTime)")
-                    conversation.lastMessageTimestamp = currentTime
-                    conversation.lastMessageSnippet = MessageCleaner.createCleanSnippet(messageText)
+                    // Mark conversation as read
                     conversation.isRead = true
                     
-                    // Update the email timestamp to match
-                    email.timestamp = currentTime
+                    print("💾 ComposeView: Conversation timestamp updated to: \(conversation.lastMessageTimestamp)")
                     
                     modelContext.insert(email)
                     
@@ -279,7 +282,9 @@ struct ComposeView: View {
                         print("✅ ComposeView: Successfully saved conversation and email")
                         print("💾 ComposeView: Final conversation timestamp: \(conversation.lastMessageTimestamp)")
                         isSending = false
+                        // Dismiss compose view and navigate to conversation
                         dismiss()
+                        onMessageSent?(conversation)
                     } catch {
                         print("❌ ComposeView: Failed to save: \(error.localizedDescription)")
                         isSending = false
@@ -299,9 +304,19 @@ struct ComposeView: View {
     }
     
     private func extractNameFromEmail(_ email: String) -> String {
-        // Extract name from email, or use email if no name
+        // First try to get name from contacts
+        if let contactName = contactsService.getContactName(for: email) {
+            return contactName
+        }
+        
+        // Otherwise extract name from email
         if let atIndex = email.firstIndex(of: "@") {
-            return String(email[..<atIndex])
+            let username = String(email[..<atIndex])
+            // Try to make it more human-readable
+            let nameFromEmail = username.replacingOccurrences(of: ".", with: " ")
+                .replacingOccurrences(of: "_", with: " ")
+                .capitalized
+            return nameFromEmail
         }
         return email
     }
@@ -326,7 +341,7 @@ struct ComposeView: View {
         let conversation = Conversation(
             contactName: extractNameFromEmail(email),
             contactEmail: email,
-            lastMessageTimestamp: Date().addingTimeInterval(60), // Use future time to ensure it appears at top
+            lastMessageTimestamp: Date(),
             lastMessageSnippet: emailObject.snippet,
             isRead: true
         )

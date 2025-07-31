@@ -5,6 +5,7 @@ import SwiftData
 class DataSyncService: ObservableObject {
     private let modelContext: ModelContext
     private let gmailService: GmailService
+    private let contactsService: ContactsService
     private var syncTimer: Timer?
     
     @Published var isSyncing = false
@@ -14,9 +15,10 @@ class DataSyncService: ObservableObject {
     // Notification for new messages
     static let newMessagesNotification = Notification.Name("DataSyncService.newMessages")
     
-    init(modelContext: ModelContext, gmailService: GmailService) {
+    init(modelContext: ModelContext, gmailService: GmailService, contactsService: ContactsService) {
         self.modelContext = modelContext
         self.gmailService = gmailService
+        self.contactsService = contactsService
     }
     
     // MARK: - Auto Sync
@@ -63,11 +65,18 @@ class DataSyncService: ObservableObject {
             // Fetch new emails from Gmail
             let fetchedEmails = try await gmailService.fetchEmails()
             
-            // Get existing conversations
+            // Get existing conversations and update their names if needed
             let existingConversations = try modelContext.fetch(FetchDescriptor<Conversation>())
             var conversationMap: [String: Conversation] = [:]
             for conversation in existingConversations {
                 conversationMap[conversation.contactEmail] = conversation
+                
+                // Update conversation name if we have a better one from contacts
+                if let addressBookName = contactsService.getContactName(for: conversation.contactEmail),
+                   conversation.contactName != addressBookName {
+                    print("🔄 DataSyncService: Updating conversation name from '\(conversation.contactName)' to '\(addressBookName)'")
+                    conversation.contactName = addressBookName
+                }
             }
             
             // Get existing email IDs to avoid duplicates
@@ -84,11 +93,34 @@ class DataSyncService: ObservableObject {
                 
                 // Find or create conversation
                 let contactEmail = email.isFromMe ? email.recipientEmail : email.senderEmail
-                let contactName = email.isFromMe ? email.recipient : email.sender
+                var contactName = email.isFromMe ? email.recipient : email.sender
+                
+                // Try to get the contact name from the address book
+                print("🔍 DataSyncService: Looking up name for email: \(contactEmail), current name: \(contactName)")
+                if let addressBookName = contactsService.getContactName(for: contactEmail) {
+                    print("✅ DataSyncService: Using address book name: \(addressBookName)")
+                    contactName = addressBookName
+                } else if contactName == contactEmail {
+                    // If the name is just the email, try to extract a better name
+                    let nameFromEmail = contactEmail.split(separator: "@").first?.replacingOccurrences(of: ".", with: " ").capitalized ?? contactEmail
+                    if nameFromEmail != contactEmail {
+                        print("📧 DataSyncService: Using extracted name: \(nameFromEmail)")
+                        contactName = nameFromEmail
+                    } else {
+                        print("⚠️ DataSyncService: No name found, using email: \(contactEmail)")
+                    }
+                } else {
+                    print("📝 DataSyncService: Using Gmail header name: \(contactName)")
+                }
                 
                 let conversation: Conversation
                 if let existing = conversationMap[contactEmail] {
                     conversation = existing
+                    // Update the name if we have a better one from contacts
+                    if let addressBookName = contactsService.getContactName(for: contactEmail),
+                       existing.contactName != addressBookName {
+                        existing.contactName = addressBookName
+                    }
                 } else {
                     conversation = Conversation(
                         contactName: contactName,

@@ -9,11 +9,13 @@ struct ConversationListView: View {
     @State private var syncService: DataSyncService?
     @State private var showingAuth = false
     @State private var showingCompose = false
+    @State private var showingSettings = false
+    @State private var navigationPath = NavigationPath()
     @State private var errorMessage: String?
     @StateObject private var contactsService = ContactsService()
     
     var body: some View {
-        NavigationView {
+        NavigationStack(path: $navigationPath) {
             ZStack {
                 // Main content
                 VStack {
@@ -22,14 +24,15 @@ struct ConversationListView: View {
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                         .background(Color.white)
                 } else {
-                    List(displayConversations) { conversation in
-                        NavigationLink(destination: ConversationDetailView(conversation: conversation, gmailService: gmailService)) {
+                    List(conversations) { conversation in
+                        NavigationLink(value: conversation) {
                             ConversationRowView(conversation: conversation, contactsService: contactsService)
                         }
                         .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
                         .listRowSeparator(.hidden)
                         .listRowBackground(Color.white)
                     }
+                    
                     .listStyle(PlainListStyle())
                     .background(Color.white)
                     .refreshable {
@@ -43,16 +46,17 @@ struct ConversationListView: View {
                 .navigationTitle("Messages")
                 .navigationBarTitleDisplayMode(.large)
                 .background(Color.white)
+                .navigationDestination(for: Conversation.self) { conversation in
+                    ConversationDetailView(conversation: conversation, gmailService: gmailService)
+                }
             .toolbar {
                 ToolbarItem(placement: .navigationBarLeading) {
-                    if !gmailService.isAuthenticated {
-                        Button(action: {
-                            showingAuth = true
-                        }) {
-                            Image(systemName: "person.crop.circle.badge.plus")
-                                .font(.title2)
-                                .foregroundColor(.blue)
-                        }
+                    Button(action: {
+                        showingSettings = true
+                    }) {
+                        Image(systemName: "gearshape")
+                            .font(.title2)
+                            .foregroundColor(.primary)
                     }
                 }
                 
@@ -68,19 +72,23 @@ struct ConversationListView: View {
             .onAppear {
                 // Initialize sync service if needed
                 if syncService == nil {
-                    syncService = DataSyncService(modelContext: modelContext, gmailService: gmailService)
+                    syncService = DataSyncService(modelContext: modelContext, gmailService: gmailService, contactsService: contactsService)
                 }
                 
-                if gmailService.isAuthenticated {
-                    syncService?.startAutoSync()
-                } else {
-                    loadSampleDataIfNeeded()
-                }
-                
-                // Load contacts for photo display
                 Task {
+                    // Request contacts access if needed, then fetch contacts
+                    if contactsService.authorizationStatus == .notDetermined {
+                        _ = await contactsService.requestAccess()
+                    }
                     if contactsService.authorizationStatus == .authorized {
                         await contactsService.fetchContacts()
+                    }
+                    
+                    // Then start syncing with Gmail
+                    if gmailService.isAuthenticated {
+                        await MainActor.run {
+                            syncService?.startAutoSync()
+                        }
                     }
                 }
             }
@@ -94,7 +102,20 @@ struct ConversationListView: View {
                 }
             }
             .sheet(isPresented: $showingCompose) {
-                ComposeView(gmailService: gmailService)
+                ComposeView(gmailService: gmailService) { conversation in
+                    // Navigate to the conversation after compose is dismissed
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                        navigationPath.append(conversation)
+                    }
+                }
+            }
+            .sheet(isPresented: $showingSettings) {
+                SettingsView(gmailService: gmailService, syncService: syncService) {
+                    // Callback when authentication state changes
+                    if gmailService.isAuthenticated {
+                        syncService?.startAutoSync()
+                    }
+                }
             }
             .alert("Error", isPresented: .constant(errorMessage != nil)) {
                 Button("OK") {
@@ -105,24 +126,6 @@ struct ConversationListView: View {
                     Text(errorMessage)
                 }
             }
-        }
-    }
-    
-    private var displayConversations: [Conversation] {
-        conversations.isEmpty ? SampleData.createSampleConversations() : conversations
-    }
-    
-    private func loadSampleDataIfNeeded() {
-        if conversations.isEmpty {
-            // Insert sample conversations into the database
-            let sampleConversations = SampleData.createSampleConversations()
-            for conversation in sampleConversations {
-                modelContext.insert(conversation)
-                for email in conversation.emails {
-                    modelContext.insert(email)
-                }
-            }
-            try? modelContext.save()
         }
     }
     

@@ -19,6 +19,23 @@ class DataSyncService: ObservableObject {
         self.modelContext = modelContext
         self.gmailService = gmailService
         self.contactsService = contactsService
+        
+        // Listen for message sent notifications
+        NotificationCenter.default.addObserver(
+            forName: NSNotification.Name("MessageSent"),
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            Task { @MainActor in
+                self?.handleMessageSent()
+            }
+        }
+    }
+    
+    deinit {
+        NotificationCenter.default.removeObserver(self)
+        syncTimer?.invalidate()
+        syncTimer = nil
     }
     
     // MARK: - Auto Sync
@@ -133,17 +150,26 @@ class DataSyncService: ObservableObject {
                     conversationMap[contactEmail] = conversation
                 }
                 
-                // Add email to conversation
+                // Add email to conversation (this will set the bidirectional relationship)
                 conversation.addEmail(email)
                 modelContext.insert(email)
                 newMessageCount += 1
                 
-                // Update conversation metadata only for received messages
-                // Don't override sent message timestamps (which are in the future)
-                if !email.isFromMe && email.timestamp > conversation.lastMessageTimestamp.addingTimeInterval(-60) {
+                // Always update conversation metadata for received messages
+                // For sent messages, only update if newer (they might have been locally sent already)
+                if !email.isFromMe {
+                    // Always update for received messages to ensure proper ordering
                     conversation.lastMessageTimestamp = email.timestamp
                     conversation.lastMessageSnippet = email.snippet
-                    conversation.isRead = email.isRead
+                    if !email.isRead {
+                        conversation.isRead = false
+                    }
+                    print("📅 DataSyncService: Updated conversation timestamp to \(email.timestamp) for RECEIVED message from \(conversation.contactEmail)")
+                } else if email.timestamp > conversation.lastMessageTimestamp {
+                    // Only update for sent messages if they're newer
+                    conversation.lastMessageTimestamp = email.timestamp
+                    conversation.lastMessageSnippet = email.snippet
+                    print("📅 DataSyncService: Updated conversation timestamp to \(email.timestamp) for SENT message to \(conversation.contactEmail)")
                 }
             }
             
@@ -154,6 +180,15 @@ class DataSyncService: ObservableObject {
             if newMessageCount > 0 {
                 hasNewMessages = true
                 NotificationCenter.default.post(name: DataSyncService.newMessagesNotification, object: nil)
+                
+                // Notify about conversation updates for UI refresh
+                for conversation in conversationMap.values {
+                    NotificationCenter.default.post(
+                        name: NSNotification.Name("ConversationUpdated"),
+                        object: conversation
+                    )
+                }
+                print("📢 DataSyncService: Posted ConversationUpdated notifications for \(conversationMap.count) conversations")
             }
             
         } catch {

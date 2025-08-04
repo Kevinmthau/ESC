@@ -25,13 +25,15 @@ final class Conversation: @unchecked Sendable {
     }
     
     func addEmail(_ email: Email) {
+        // Establish the bidirectional relationship
+        email.conversation = self
         emails.append(email)
+        print("📨 Added email \(email.id) to conversation. Total emails: \(emails.count)")
         
-        // Update conversation metadata
-        if email.timestamp > lastMessageTimestamp {
-            lastMessageTimestamp = email.timestamp
-            lastMessageSnippet = email.snippet
-        }
+        // Always update conversation metadata to ensure it moves to top
+        lastMessageTimestamp = email.timestamp
+        lastMessageSnippet = email.snippet
+        print("🕐 Conversation timestamp updated to: \(email.timestamp)")
         
         if !email.isRead {
             isRead = false

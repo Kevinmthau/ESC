@@ -278,9 +278,24 @@ struct ComposeView: View {
                     }
                     
                     do {
+                        // Process pending changes first
+                        modelContext.processPendingChanges()
                         try modelContext.save()
                         print("✅ ComposeView: Successfully saved conversation and email")
                         print("💾 ComposeView: Final conversation timestamp: \(conversation.lastMessageTimestamp)")
+                        
+                        // Notify about the conversation update
+                        NotificationCenter.default.post(
+                            name: NSNotification.Name("ConversationUpdated"),
+                            object: conversation
+                        )
+                        
+                        // Notify sync service about the sent message
+                        NotificationCenter.default.post(
+                            name: NSNotification.Name("MessageSent"),
+                            object: conversation
+                        )
+                        
                         isSending = false
                         // Dismiss compose view and navigate to conversation
                         dismiss()

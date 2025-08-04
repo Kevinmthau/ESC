@@ -15,6 +15,7 @@ final class Email: @unchecked Sendable {
     var timestamp: Date
     var isRead: Bool
     var isFromMe: Bool
+    var conversation: Conversation?
     
     init(
         id: String,
@@ -28,7 +29,8 @@ final class Email: @unchecked Sendable {
         snippet: String,
         timestamp: Date,
         isRead: Bool = false,
-        isFromMe: Bool = false
+        isFromMe: Bool = false,
+        conversation: Conversation? = nil
     ) {
         self.id = id
         self.messageId = messageId
@@ -42,5 +44,6 @@ final class Email: @unchecked Sendable {
         self.timestamp = timestamp
         self.isRead = isRead
         self.isFromMe = isFromMe
+        self.conversation = conversation
     }
 }

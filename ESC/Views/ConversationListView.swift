@@ -4,15 +4,22 @@ import SwiftData
 struct ConversationListView: View {
     @Environment(\.modelContext) private var modelContext
     @Query(sort: \Conversation.lastMessageTimestamp, order: .reverse) 
-    private var conversations: [Conversation]
+    private var allConversations: [Conversation]
     @StateObject private var gmailService = GmailService()
+    @StateObject private var contactsService = ContactsService()
     @State private var syncService: DataSyncService?
     @State private var showingAuth = false
     @State private var showingCompose = false
     @State private var showingSettings = false
     @State private var navigationPath = NavigationPath()
     @State private var errorMessage: String?
-    @StateObject private var contactsService = ContactsService()
+    @State private var refreshTrigger = 0
+    
+    private var conversations: [Conversation] {
+        let sorted = allConversations.sorted { $0.lastMessageTimestamp > $1.lastMessageTimestamp }
+        print("📋 ConversationListView: Showing \(sorted.count) conversations, sorted by timestamp")
+        return sorted
+    }
     
     var body: some View {
         NavigationStack(path: $navigationPath) {
@@ -32,7 +39,6 @@ struct ConversationListView: View {
                         .listRowSeparator(.hidden)
                         .listRowBackground(Color.white)
                     }
-                    
                     .listStyle(PlainListStyle())
                     .background(Color.white)
                     .refreshable {
@@ -91,9 +97,39 @@ struct ConversationListView: View {
                         }
                     }
                 }
+                
+                // Listen for conversation updates
+                NotificationCenter.default.addObserver(
+                    forName: NSNotification.Name("ConversationUpdated"),
+                    object: nil,
+                    queue: .main
+                ) { notification in
+                    print("🔄 ConversationListView: Received ConversationUpdated notification")
+                    if let conversation = notification.object as? Conversation {
+                        print("📅 Updated conversation: \(conversation.contactEmail), timestamp: \(conversation.lastMessageTimestamp)")
+                    }
+                    
+                    // Force a model context refresh and save
+                    modelContext.processPendingChanges()
+                    do {
+                        try modelContext.save()
+                        print("✅ ConversationListView: Saved model context after conversation update")
+                        
+                        // Force UI refresh by updating trigger
+                        refreshTrigger += 1
+                        print("🔄 ConversationListView: Triggered UI refresh (\(refreshTrigger))")
+                    } catch {
+                        print("❌ ConversationListView: Failed to save context: \(error)")
+                    }
+                }
             }
             .onDisappear {
                 syncService?.stopAutoSync()
+                NotificationCenter.default.removeObserver(
+                    self,
+                    name: NSNotification.Name("ConversationUpdated"),
+                    object: nil
+                )
             }
             .sheet(isPresented: $showingAuth) {
                 AuthenticationView(gmailService: gmailService) {
@@ -126,67 +162,13 @@ struct ConversationListView: View {
                     Text(errorMessage)
                 }
             }
-        }
-    }
-    
-}
-
-struct ConversationRowView: View {
-    let conversation: Conversation
-    let contactsService: ContactsService
-    
-    var body: some View {
-        VStack(spacing: 0) {
-            HStack(spacing: 12) {
-                // Avatar with contact photo
-                ContactAvatarView(
-                    email: conversation.contactEmail,
-                    name: conversation.contactName,
-                    contactsService: contactsService,
-                    size: 50
-                )
-                
-                VStack(alignment: .leading, spacing: 4) {
-                    HStack {
-                        Text(conversation.contactName)
-                            .font(.headline)
-                            .fontWeight(.semibold)
-                            .foregroundColor(.primary)
-                            .lineLimit(1)
-                        
-                        Spacer(minLength: 8)
-                        
-                        Text(conversation.lastMessageTimestamp, style: .time)
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                            .fixedSize()
-                    }
-                    
-                    Text(conversation.lastMessageSnippet)
-                        .font(.subheadline)
-                        .foregroundColor(.secondary)
-                        .lineLimit(2)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                
-                if !conversation.isRead {
-                    Circle()
-                        .fill(Color.blue)
-                        .frame(width: 8, height: 8)
-                        .fixedSize()
-                }
+            .onChange(of: refreshTrigger) { _, _ in
+                // This forces SwiftUI to re-evaluate the conversations computed property
+                print("🔄 ConversationListView: Processing refresh trigger")
             }
-            .padding(.vertical, 8)
-            .frame(minHeight: 66)
-            
-            // Separator line
-            Divider()
-                .background(Color.gray.opacity(0.3))
-                .padding(.leading, 62) // Align with text content
         }
-        .background(Color.white)
     }
+    
 }
 
 

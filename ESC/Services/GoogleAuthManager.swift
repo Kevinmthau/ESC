@@ -10,17 +10,11 @@ class GoogleAuthManager: NSObject, ObservableObject {
     @Published var accessToken: String?
     @Published var refreshToken: String?
     
-    private let clientId = "999923476073-b4m4r3o96gv30rqmo71qo210oa46au74.apps.googleusercontent.com"
-    private let clientSecret = "" // Not needed for iOS
-    private let redirectUri = "com.googleusercontent.apps.999923476073-b4m4r3o96gv30rqmo71qo210oa46au74:/oauth"
-    private let scope = "https://www.googleapis.com/auth/gmail.modify https://www.googleapis.com/auth/gmail.send"
+    private let clientId = Constants.Gmail.clientId
+    private let redirectUri = Constants.Gmail.redirectUri
+    private let scope = Constants.Gmail.scopes
     
     private var authSession: ASWebAuthenticationSession?
-    
-    // UserDefaults keys for persistent storage
-    private let accessTokenKey = "GoogleAuth.AccessToken"
-    private let refreshTokenKey = "GoogleAuth.RefreshToken"
-    private let isAuthenticatedKey = "GoogleAuth.IsAuthenticated"
     
     private override init() {
         super.init()
@@ -65,7 +59,7 @@ class GoogleAuthManager: NSObject, ObservableObject {
     }
     
     private func buildAuthURL() -> URL? {
-        var components = URLComponents(string: "https://accounts.google.com/o/oauth2/v2/auth")
+        var components = URLComponents(string: Constants.Google.authURL)
         components?.queryItems = [
             URLQueryItem(name: "client_id", value: clientId),
             URLQueryItem(name: "redirect_uri", value: redirectUri),
@@ -110,7 +104,7 @@ class GoogleAuthManager: NSObject, ObservableObject {
     }
     
     private func exchangeCodeForTokens(code: String) async throws {
-        guard let url = URL(string: "https://oauth2.googleapis.com/token") else {
+        guard let url = URL(string: Constants.Google.tokenURL) else {
             throw AuthError.invalidURL
         }
         
@@ -148,7 +142,7 @@ class GoogleAuthManager: NSObject, ObservableObject {
             throw AuthError.noRefreshToken
         }
         
-        guard let url = URL(string: "https://oauth2.googleapis.com/token") else {
+        guard let url = URL(string: Constants.Google.tokenURL) else {
             throw AuthError.invalidURL
         }
         
@@ -185,9 +179,9 @@ class GoogleAuthManager: NSObject, ObservableObject {
     private func loadStoredTokens() {
         let userDefaults = UserDefaults.standard
         
-        self.accessToken = userDefaults.string(forKey: accessTokenKey)
-        self.refreshToken = userDefaults.string(forKey: refreshTokenKey)
-        self.isAuthenticated = userDefaults.bool(forKey: isAuthenticatedKey)
+        self.accessToken = userDefaults.string(forKey: Constants.UserDefaults.accessTokenKey)
+        self.refreshToken = userDefaults.string(forKey: Constants.UserDefaults.refreshTokenKey)
+        self.isAuthenticated = userDefaults.bool(forKey: Constants.UserDefaults.isAuthenticatedKey)
         
         print("🔑 GoogleAuthManager: Loaded stored auth state - isAuthenticated: \(isAuthenticated)")
         if let token = accessToken {
@@ -218,9 +212,9 @@ class GoogleAuthManager: NSObject, ObservableObject {
     private func saveTokens() {
         let userDefaults = UserDefaults.standard
         
-        userDefaults.set(accessToken, forKey: accessTokenKey)
-        userDefaults.set(refreshToken, forKey: refreshTokenKey)
-        userDefaults.set(isAuthenticated, forKey: isAuthenticatedKey)
+        userDefaults.set(accessToken, forKey: Constants.UserDefaults.accessTokenKey)
+        userDefaults.set(refreshToken, forKey: Constants.UserDefaults.refreshTokenKey)
+        userDefaults.set(isAuthenticated, forKey: Constants.UserDefaults.isAuthenticatedKey)
         
         print("🔑 GoogleAuthManager: Saved authentication state to UserDefaults")
     }
@@ -236,9 +230,9 @@ class GoogleAuthManager: NSObject, ObservableObject {
     private func clearStoredTokens() {
         let userDefaults = UserDefaults.standard
         
-        userDefaults.removeObject(forKey: accessTokenKey)
-        userDefaults.removeObject(forKey: refreshTokenKey)
-        userDefaults.removeObject(forKey: isAuthenticatedKey)
+        userDefaults.removeObject(forKey: Constants.UserDefaults.accessTokenKey)
+        userDefaults.removeObject(forKey: Constants.UserDefaults.refreshTokenKey)
+        userDefaults.removeObject(forKey: Constants.UserDefaults.isAuthenticatedKey)
         
         print("🔑 GoogleAuthManager: Cleared stored authentication state")
     }
@@ -254,42 +248,3 @@ extension GoogleAuthManager: ASWebAuthenticationPresentationContextProviding {
     }
 }
 
-struct TokenResponse: Codable {
-    let accessToken: String
-    let refreshToken: String?
-    let expiresIn: Int?
-    let tokenType: String?
-    
-    enum CodingKeys: String, CodingKey {
-        case accessToken = "access_token"
-        case refreshToken = "refresh_token"
-        case expiresIn = "expires_in"
-        case tokenType = "token_type"
-    }
-}
-
-enum AuthError: Error, LocalizedError {
-    case invalidURL
-    case noCallbackURL
-    case invalidCallback
-    case authenticationFailed(String)
-    case noAuthCode
-    case noRefreshToken
-    
-    var errorDescription: String? {
-        switch self {
-        case .invalidURL:
-            return "Invalid URL"
-        case .noCallbackURL:
-            return "No callback URL received"
-        case .invalidCallback:
-            return "Invalid callback URL"
-        case .authenticationFailed(let error):
-            return "Authentication failed: \(error)"
-        case .noAuthCode:
-            return "No authorization code received"
-        case .noRefreshToken:
-            return "No refresh token available"
-        }
-    }
-}

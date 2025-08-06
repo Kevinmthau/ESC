@@ -2,16 +2,19 @@ import SwiftUI
 import SwiftData
 
 struct ConversationDetailView: View {
-    let conversation: Conversation
+    @Bindable var conversation: Conversation
     @ObservedObject var gmailService: GmailService
     @Environment(\.modelContext) private var modelContext
+    @Environment(\.dismiss) private var dismiss
     @StateObject private var contactsService = ContactsService()
     @State private var messageText = ""
+    @State private var recipientEmail = ""
     @State private var isSending = false
     @State private var showingError = false
     @State private var errorMessage = ""
     @State private var scrollToId: String?
-    @State private var isTextFieldFocused = false
+    @FocusState private var isTextFieldFocused: Bool
+    @FocusState private var isRecipientFocused: Bool
     @State private var emails: [Email] = []
     @State private var refreshTrigger = 0
     
@@ -24,38 +27,93 @@ struct ConversationDetailView: View {
         return sorted
     }
     
+    private var isNewConversation: Bool {
+        conversation.contactEmail.isEmpty
+    }
+    
     var body: some View {
         VStack(spacing: 0) {
-            // Contact header with profile picture
-            ContactHeaderView(
-                conversation: conversation,
-                contactsService: contactsService
-            )
+            // For new conversations, show recipient field
+            if isNewConversation {
+                VStack(spacing: 0) {
+                    HStack(spacing: 12) {
+                        Text("To:")
+                            .font(.body)
+                            .foregroundColor(.primary)
+                            .frame(width: 30, alignment: .leading)
+                        
+                        TextField("Email address", text: $recipientEmail)
+                            .textFieldStyle(PlainTextFieldStyle())
+                            .keyboardType(.emailAddress)
+                            .autocorrectionDisabled()
+                            .textInputAutocapitalization(.never)
+                            .focused($isRecipientFocused)
+                        
+                        Button(action: {
+                            // TODO: Add contacts picker
+                        }) {
+                            Image(systemName: "plus.circle.fill")
+                                .font(.title2)
+                                .foregroundColor(.blue)
+                        }
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 12)
+                    
+                    Divider()
+                        .background(Color.gray.opacity(0.3))
+                }
+                .background(Color.white)
+            } else {
+                // Contact header with profile picture for existing conversations
+                ContactHeaderView(
+                    conversation: conversation,
+                    contactsService: contactsService
+                )
+            }
             
             // Messages list
             ScrollViewReader { proxy in
                 ScrollView {
-                    LazyVStack(spacing: 8) {
-                        ForEach(conversationEmails, id: \.id) { email in
-                            MessageBubbleView(email: email)
-                                .id(email.id)
+                    if isNewConversation {
+                        VStack {
+                            Spacer()
+                            Text("Start a new conversation with \(conversation.contactName)")
+                                .font(.subheadline)
+                                .foregroundColor(.secondary)
+                                .padding(.bottom, 20)
                         }
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    } else {
+                        LazyVStack(spacing: 8) {
+                            ForEach(conversationEmails, id: \.id) { email in
+                                MessageBubbleView(email: email)
+                                    .id(email.id)
+                            }
+                        }
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 8)
                     }
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 8)
                 }
                 .background(Color.white)
                 .onAppear {
-                    loadEmails()
-                    markAsRead()
-                    
-                    // Scroll to bottom after emails load with longer delay
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                        if let lastEmail = conversationEmails.last {
-                            print("📍 OnAppear: Scrolling to last email \(lastEmail.id) at \(lastEmail.timestamp)")
-                            proxy.scrollTo(lastEmail.id, anchor: .bottom)
-                        } else {
-                            print("⚠️ OnAppear: No emails found to scroll to")
+                    if !isNewConversation {
+                        loadEmails()
+                        markAsRead()
+                        
+                        // Scroll to bottom after emails load with longer delay
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                            if let lastEmail = conversationEmails.last {
+                                print("📍 OnAppear: Scrolling to last email \(lastEmail.id) at \(lastEmail.timestamp)")
+                                proxy.scrollTo(lastEmail.id, anchor: .bottom)
+                            } else {
+                                print("⚠️ OnAppear: No emails found to scroll to")
+                            }
+                        }
+                    } else {
+                        // Focus the recipient field for new conversations
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                            isRecipientFocused = true
                         }
                     }
                 }
@@ -112,8 +170,17 @@ struct ConversationDetailView: View {
             )
         }
         .background(Color.white)
-        .navigationTitle("")
+        .navigationTitle(isNewConversation ? "New Message" : "")
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            if isNewConversation {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Button("Cancel") {
+                        dismiss()
+                    }
+                }
+            }
+        }
         .alert("Error", isPresented: $showingError) {
             Button("OK") {
                 showingError = false
@@ -162,8 +229,22 @@ struct ConversationDetailView: View {
     private func sendMessage() {
         guard !messageText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
         
+        // For new conversations, validate recipient
+        if isNewConversation {
+            guard !recipientEmail.isEmpty && recipientEmail.contains("@") else {
+                errorMessage = "Please enter a valid email address"
+                showingError = true
+                return
+            }
+            
+            // Update conversation with recipient info
+            conversation.contactEmail = recipientEmail
+            conversation.contactName = extractNameFromEmail(recipientEmail)
+        }
+        
         isSending = true
         let messageBody = messageText
+        let recipient = isNewConversation ? recipientEmail : conversation.contactEmail
         
         Task {
             do {
@@ -172,7 +253,7 @@ struct ConversationDetailView: View {
                 if gmailService.isAuthenticated {
                     userEmail = try await gmailService.getUserEmail()
                     // Send via Gmail API
-                    try await gmailService.sendEmail(to: conversation.contactEmail, body: messageBody)
+                    try await gmailService.sendEmail(to: recipient, body: messageBody)
                 } else {
                     userEmail = "me@example.com" // Fallback for offline mode
                 }
@@ -195,6 +276,11 @@ struct ConversationDetailView: View {
                     // Force timestamp update to ensure list reordering
                     conversation.lastMessageTimestamp = email.timestamp
                     conversation.lastMessageSnippet = email.snippet
+                    
+                    // For new conversations, ensure the conversation is saved
+                    if conversation.modelContext == nil {
+                        modelContext.insert(conversation)
+                    }
                     
                     print("✅ Added email to conversation, final timestamp: \(conversation.lastMessageTimestamp)")
                     print("📝 Final conversation snippet: \(conversation.lastMessageSnippet)")
@@ -263,6 +349,24 @@ struct ConversationDetailView: View {
         isSending = false
         errorMessage = error.localizedDescription
         showingError = true
+    }
+    
+    private func extractNameFromEmail(_ email: String) -> String {
+        // First try to get name from contacts
+        if let contactName = contactsService.getContactName(for: email) {
+            return contactName
+        }
+        
+        // Otherwise extract name from email
+        if let atIndex = email.firstIndex(of: "@") {
+            let username = String(email[..<atIndex])
+            // Try to make it more human-readable
+            let nameFromEmail = username.replacingOccurrences(of: ".", with: " ")
+                .replacingOccurrences(of: "_", with: " ")
+                .capitalized
+            return nameFromEmail
+        }
+        return email
     }
 }
 

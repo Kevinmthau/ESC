@@ -9,14 +9,17 @@ struct ConversationListView: View {
     @StateObject private var contactsService = ContactsService()
     @State private var syncService: DataSyncService?
     @State private var showingAuth = false
-    @State private var showingCompose = false
+    @State private var showingNewConversation = false
     @State private var showingSettings = false
     @State private var navigationPath = NavigationPath()
     @State private var errorMessage: String?
     @State private var refreshTrigger = 0
+    @State private var pendingNavigation: Conversation?
     
     private var conversations: [Conversation] {
-        let sorted = allConversations.sorted { $0.lastMessageTimestamp > $1.lastMessageTimestamp }
+        // Only show conversations that have messages
+        let nonEmpty = allConversations.filter { !$0.lastMessageSnippet.isEmpty }
+        let sorted = nonEmpty.sorted { $0.lastMessageTimestamp > $1.lastMessageTimestamp }
         print("📋 ConversationListView: Showing \(sorted.count) conversations, sorted by timestamp")
         return sorted
     }
@@ -26,7 +29,31 @@ struct ConversationListView: View {
             ZStack {
                 // Main content
                 VStack {
-                if syncService?.isSyncing == true && conversations.isEmpty {
+                if !gmailService.isAuthenticated {
+                    // Show sign-in prompt when not authenticated
+                    VStack(spacing: 20) {
+                        Image(systemName: "envelope.circle")
+                            .font(.system(size: 80))
+                            .foregroundColor(.gray)
+                        Text("Sign in to view your emails")
+                            .font(.title2)
+                            .foregroundColor(.primary)
+                        Button(action: {
+                            showingAuth = true
+                        }) {
+                            HStack {
+                                Image(systemName: "person.crop.circle.badge.plus")
+                                Text("Sign In with Google")
+                            }
+                            .padding()
+                            .background(Color.blue)
+                            .foregroundColor(.white)
+                            .cornerRadius(10)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background(Color.white)
+                } else if syncService?.isSyncing == true && conversations.isEmpty {
                     ProgressView("Loading emails...")
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                         .background(Color.white)
@@ -68,7 +95,7 @@ struct ConversationListView: View {
                 
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button(action: {
-                        showingCompose = true
+                        showingNewConversation = true
                     }) {
                         Image(systemName: "square.and.pencil")
                             .font(.title2)
@@ -137,12 +164,20 @@ struct ConversationListView: View {
                     syncService?.startAutoSync()
                 }
             }
-            .sheet(isPresented: $showingCompose) {
-                ComposeView(gmailService: gmailService) { conversation in
-                    // Navigate to the conversation after compose is dismissed
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                        navigationPath.append(conversation)
-                    }
+            .onChange(of: showingNewConversation) { _, newValue in
+                if newValue {
+                    // Create a new empty conversation and navigate to it
+                    let newConversation = Conversation(
+                        contactName: "",
+                        contactEmail: "",
+                        lastMessageTimestamp: Date(),
+                        lastMessageSnippet: "",
+                        isRead: true
+                    )
+                    
+                    // Don't insert into context yet - let ConversationDetailView handle it
+                    navigationPath.append(newConversation)
+                    showingNewConversation = false
                 }
             }
             .sheet(isPresented: $showingSettings) {
@@ -150,6 +185,10 @@ struct ConversationListView: View {
                     // Callback when authentication state changes
                     if gmailService.isAuthenticated {
                         syncService?.startAutoSync()
+                    } else {
+                        // Clear navigation when logged out
+                        navigationPath = NavigationPath()
+                        syncService?.stopAutoSync()
                     }
                 }
             }
@@ -166,9 +205,35 @@ struct ConversationListView: View {
                 // This forces SwiftUI to re-evaluate the conversations computed property
                 print("🔄 ConversationListView: Processing refresh trigger")
             }
+            .onChange(of: gmailService.isAuthenticated) { _, newValue in
+                print("🔑 ConversationListView: Authentication state changed to: \(newValue)")
+                if !newValue {
+                    // Clear navigation path when logged out
+                    navigationPath = NavigationPath()
+                    syncService?.stopAutoSync()
+                    refreshTrigger += 1
+                }
+            }
         }
     }
     
+    private func extractNameFromEmail(_ email: String) -> String {
+        // First try to get name from contacts
+        if let contactName = contactsService.getContactName(for: email) {
+            return contactName
+        }
+        
+        // Otherwise extract name from email
+        if let atIndex = email.firstIndex(of: "@") {
+            let username = String(email[..<atIndex])
+            // Try to make it more human-readable
+            let nameFromEmail = username.replacingOccurrences(of: ".", with: " ")
+                .replacingOccurrences(of: "_", with: " ")
+                .capitalized
+            return nameFromEmail
+        }
+        return email
+    }
 }
 
 

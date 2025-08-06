@@ -108,6 +108,23 @@ class DataSyncService: ObservableObject {
                     continue
                 }
                 
+                // For sent messages, check if we recently created a local copy
+                if email.isFromMe {
+                    let recentCutoff = Date().addingTimeInterval(-60) // Within last minute
+                    let hasRecentLocal = existingEmails.contains { existingEmail in
+                        existingEmail.isFromMe &&
+                        existingEmail.recipientEmail == email.recipientEmail &&
+                        existingEmail.body == email.body &&
+                        existingEmail.timestamp > recentCutoff &&
+                        existingEmail.messageId != email.messageId
+                    }
+                    
+                    if hasRecentLocal {
+                        print("⏭️ DataSyncService: Skipping duplicate sent message to \(email.recipientEmail)")
+                        continue
+                    }
+                }
+                
                 // Find or create conversation
                 let contactEmail = email.isFromMe ? email.recipientEmail : email.senderEmail
                 var contactName = email.isFromMe ? email.recipient : email.sender
@@ -204,11 +221,8 @@ class DataSyncService: ObservableObject {
         // Just mark the sync time
         lastSyncTime = Date()
         
-        // Schedule a sync after a short delay to catch any server-side changes
-        Task {
-            try? await Task.sleep(nanoseconds: 2_000_000_000) // 2 seconds
-            await syncData(silent: true)
-        }
+        // Don't sync immediately after sending to avoid duplicates
+        // The next regular sync will pick up any server-side changes
     }
     
     func handleConversationOpened(_ conversation: Conversation) {

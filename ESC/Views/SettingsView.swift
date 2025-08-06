@@ -162,6 +162,10 @@ struct SettingsView: View {
                 gmailService.signOut()
                 
                 print("✅ SettingsView: Successfully deleted all account data")
+                
+                // Notify parent view of auth change
+                onAuthChange?()
+                
                 dismiss()
                 
             } catch {
@@ -176,6 +180,10 @@ struct SettingsView: View {
         
         gmailService.signOut()
         userEmail = ""
+        
+        // Notify parent view of auth change
+        onAuthChange?()
+        
         showingAuth = true
     }
 }

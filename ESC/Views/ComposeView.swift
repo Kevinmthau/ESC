@@ -20,9 +20,11 @@ struct ComposeView: View {
     @StateObject private var contactsService = ContactsService()
     
     let onMessageSent: ((Conversation) -> Void)?
+    let existingConversation: Conversation?
     
-    init(gmailService: GmailService, onMessageSent: ((Conversation) -> Void)? = nil) {
+    init(gmailService: GmailService, existingConversation: Conversation? = nil, onMessageSent: ((Conversation) -> Void)? = nil) {
         self.gmailService = gmailService
+        self.existingConversation = existingConversation
         self.onMessageSent = onMessageSent
     }
     
@@ -297,9 +299,9 @@ struct ComposeView: View {
                         )
                         
                         isSending = false
-                        // Dismiss compose view and navigate to conversation
-                        dismiss()
+                        // Call the callback first, then dismiss
                         onMessageSent?(conversation)
+                        dismiss()
                     } catch {
                         print("❌ ComposeView: Failed to save: \(error.localizedDescription)")
                         isSending = false

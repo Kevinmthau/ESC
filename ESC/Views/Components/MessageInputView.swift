@@ -2,9 +2,8 @@ import SwiftUI
 
 struct MessageInputView: View {
     @Binding var messageText: String
-    @Binding var isTextFieldFocused: Bool
+    var isTextFieldFocused: FocusState<Bool>.Binding
     let onSend: () -> Void
-    @FocusState private var internalFocusState: Bool
     
     var body: some View {
         VStack(spacing: 0) {
@@ -34,19 +33,13 @@ struct MessageInputView: View {
             .background(Color.gray.opacity(0.1))
             .cornerRadius(20)
             .frame(minHeight: 36)
-            .focused($internalFocusState)
-            .onChange(of: internalFocusState) { _, newValue in
-                isTextFieldFocused = newValue
-            }
-            .onChange(of: isTextFieldFocused) { _, newValue in
-                internalFocusState = newValue
-            }
+            .focused(isTextFieldFocused)
     }
     
     private var sendButton: some View {
         Button(action: {
             onSend()
-            internalFocusState = false
+            isTextFieldFocused.wrappedValue = false
         }) {
             Image(systemName: "arrow.up.circle.fill")
                 .font(.title2)
@@ -62,14 +55,23 @@ struct MessageInputView: View {
 }
 
 #Preview {
-    VStack {
-        Spacer()
-        MessageInputView(
-            messageText: .constant("Hello"),
-            isTextFieldFocused: .constant(false),
-            onSend: {
-                print("Send tapped")
+    struct PreviewWrapper: View {
+        @State private var messageText = "Hello"
+        @FocusState private var isFocused: Bool
+        
+        var body: some View {
+            VStack {
+                Spacer()
+                MessageInputView(
+                    messageText: $messageText,
+                    isTextFieldFocused: $isFocused,
+                    onSend: {
+                        print("Send tapped")
+                    }
+                )
             }
-        )
+        }
     }
+    
+    return PreviewWrapper()
 }

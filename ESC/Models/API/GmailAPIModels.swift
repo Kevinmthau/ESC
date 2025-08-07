@@ -25,6 +25,8 @@ struct GmailPayload: Codable {
     let parts: [GmailPayload]?
     let body: GmailBody?
     let mimeType: String?
+    let filename: String?
+    let partId: String?
 }
 
 struct GmailHeader: Codable {
@@ -35,6 +37,7 @@ struct GmailHeader: Codable {
 struct GmailBody: Codable {
     let data: String?
     let size: Int?
+    let attachmentId: String?
 }
 
 struct GmailProfile: Codable {
@@ -52,4 +55,9 @@ struct SendMessageResponse: Codable {
     let id: String
     let threadId: String?
     let labelIds: [String]?
+}
+
+struct AttachmentResponse: Codable {
+    let size: Int
+    let data: String?
 }

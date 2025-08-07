@@ -16,6 +16,7 @@ final class Email: @unchecked Sendable {
     var isRead: Bool
     var isFromMe: Bool
     var conversation: Conversation?
+    var attachments: [Attachment] = []
     
     init(
         id: String,

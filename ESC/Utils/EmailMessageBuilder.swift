@@ -6,31 +6,73 @@ struct EmailMessageBuilder {
     private let subject: String
     private let body: String
     private let date: Date
+    private let attachments: [(filename: String, data: Data, mimeType: String)]
     
-    init(from: String, to: String, subject: String = "(no subject)", body: String, date: Date = Date()) {
+    init(from: String, to: String, subject: String = "(no subject)", body: String, date: Date = Date(), attachments: [(filename: String, data: Data, mimeType: String)] = []) {
         self.from = from
         self.to = to
         self.subject = subject
         self.body = body
         self.date = date
+        self.attachments = attachments
     }
     
     func buildRFC2822Message() -> String {
         let dateString = DateFormatters.rfc2822.string(from: date)
         
-        let message = """
-        From: \(from)
-        To: \(to)
-        Subject: \(subject)
-        Date: \(dateString)
-        MIME-Version: 1.0
-        Content-Type: text/plain; charset=UTF-8
-        Content-Transfer-Encoding: quoted-printable
+        if attachments.isEmpty {
+            // Simple message without attachments
+            let message = """
+            From: \(from)
+            To: \(to)
+            Subject: \(subject)
+            Date: \(dateString)
+            MIME-Version: 1.0
+            Content-Type: text/plain; charset=UTF-8
+            Content-Transfer-Encoding: quoted-printable
 
-        \(body)
-        """
-        
-        return message
+            \(body)
+            """
+            
+            return message
+        } else {
+            // Multipart message with attachments
+            let boundary = "boundary_\(UUID().uuidString)"
+            
+            var message = """
+            From: \(from)
+            To: \(to)
+            Subject: \(subject)
+            Date: \(dateString)
+            MIME-Version: 1.0
+            Content-Type: multipart/mixed; boundary="\(boundary)"
+
+            --\(boundary)
+            Content-Type: text/plain; charset=UTF-8
+            Content-Transfer-Encoding: quoted-printable
+
+            \(body)
+
+            """
+            
+            // Add attachments
+            for attachment in attachments {
+                let base64Data = attachment.data.base64EncodedString(options: .lineLength64Characters)
+                message += """
+                --\(boundary)
+                Content-Type: \(attachment.mimeType); name="\(attachment.filename)"
+                Content-Disposition: attachment; filename="\(attachment.filename)"
+                Content-Transfer-Encoding: base64
+
+                \(base64Data)
+
+                """
+            }
+            
+            message += "--\(boundary)--"
+            
+            return message
+        }
     }
     
     func validate() throws {

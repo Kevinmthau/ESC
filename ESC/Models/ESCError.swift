@@ -61,6 +61,7 @@ enum GmailError: Error, LocalizedError {
     case invalidMessageFormat
     case sendFailed(String)
     case fetchFailed(String)
+    case decodingFailed(String)
     case quotaExceeded
     case messageNotFound
     case invalidRecipient
@@ -77,6 +78,8 @@ enum GmailError: Error, LocalizedError {
             return "Failed to send email: \(reason)"
         case .fetchFailed(let reason):
             return "Failed to fetch emails: \(reason)"
+        case .decodingFailed(let reason):
+            return "Failed to decode data: \(reason)"
         case .quotaExceeded:
             return "Gmail API quota exceeded"
         case .messageNotFound:

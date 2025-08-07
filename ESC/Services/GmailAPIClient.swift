@@ -30,6 +30,36 @@ actor GmailAPIClient {
         return try await performRequest(request, responseType: GmailMessage.self)
     }
     
+    func fetchAttachment(messageId: String, attachmentId: String) async throws -> Data {
+        guard let url = URL(string: "\(baseURL)/users/me/messages/\(messageId)/attachments/\(attachmentId)") else {
+            throw GmailError.invalidURL
+        }
+        
+        let request = try await createAuthenticatedRequest(url: url)
+        let response = try await performRequest(request, responseType: AttachmentResponse.self)
+        
+        // Decode base64url encoded data
+        guard let data = response.data else {
+            throw GmailError.fetchFailed("No attachment data")
+        }
+        
+        // Gmail uses URL-safe base64, need to convert
+        let base64 = data
+            .replacingOccurrences(of: "-", with: "+")
+            .replacingOccurrences(of: "_", with: "/")
+        
+        // Add padding if needed
+        let paddedBase64 = base64.padding(toLength: ((base64.count + 3) / 4) * 4,
+                                          withPad: "=",
+                                          startingAt: 0)
+        
+        guard let decodedData = Data(base64Encoded: paddedBase64) else {
+            throw GmailError.decodingFailed("Failed to decode attachment data")
+        }
+        
+        return decodedData
+    }
+    
     func sendMessage(raw: String) async throws -> SendMessageResponse {
         guard let url = URL(string: "\(baseURL)/users/me/messages/send") else {
             throw GmailError.invalidURL

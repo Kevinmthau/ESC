@@ -79,7 +79,7 @@ class DataSyncService: ObservableObject {
         }
         
         do {
-            // Fetch new emails from Gmail
+            // Fetch new emails from Gmail (attachments are fetched in GmailService.fetchEmails)
             let fetchedEmails = try await gmailService.fetchEmails()
             
             // Get existing conversations and update their names if needed
@@ -110,18 +110,43 @@ class DataSyncService: ObservableObject {
                 
                 // For sent messages, check if we recently created a local copy
                 if email.isFromMe {
-                    let recentCutoff = Date().addingTimeInterval(-60) // Within last minute
-                    let hasRecentLocal = existingEmails.contains { existingEmail in
+                    let recentCutoff = Date().addingTimeInterval(-300) // Within last 5 minutes
+                    
+                    // Find matching local emails that could be duplicates
+                    let matchingLocalEmails = existingEmails.filter { existingEmail in
                         existingEmail.isFromMe &&
                         existingEmail.recipientEmail == email.recipientEmail &&
-                        existingEmail.body == email.body &&
                         existingEmail.timestamp > recentCutoff &&
                         existingEmail.messageId != email.messageId
                     }
                     
+                    // Check if any match by content (comparing cleaned versions)
+                    let cleanedNewBody = email.body.trimmingCharacters(in: .whitespacesAndNewlines)
+                    let hasRecentLocal = matchingLocalEmails.contains { existingEmail in
+                        let cleanedExistingBody = existingEmail.body.trimmingCharacters(in: .whitespacesAndNewlines)
+                        return cleanedExistingBody == cleanedNewBody
+                    }
+                    
                     if hasRecentLocal {
-                        print("⏭️ DataSyncService: Skipping duplicate sent message to \(email.recipientEmail)")
-                        continue
+                        print("⏭️ DataSyncService: Skipping duplicate sent message to \(email.recipientEmail) with body: \(email.snippet.prefix(30))...")
+                        
+                        // Find and remove the local copy to replace with the synced version
+                        if let localCopy = matchingLocalEmails.first(where: { 
+                            $0.body.trimmingCharacters(in: .whitespacesAndNewlines) == cleanedNewBody 
+                        }) {
+                            print("🔄 DataSyncService: Replacing local copy \(localCopy.id) with synced message \(email.messageId)")
+                            
+                            // Remove the local copy from the conversation
+                            if let conversation = localCopy.conversation {
+                                conversation.emails.removeAll { $0.id == localCopy.id }
+                            }
+                            
+                            // Delete the local copy
+                            modelContext.delete(localCopy)
+                        }
+                        
+                        // Don't add the synced version - we'll let it be added normally below
+                        // This ensures we keep the Gmail message ID for future duplicate detection
                     }
                 }
                 
@@ -170,6 +195,12 @@ class DataSyncService: ObservableObject {
                 // Add email to conversation (this will set the bidirectional relationship)
                 conversation.addEmail(email)
                 modelContext.insert(email)
+                
+                // Insert attachments too
+                for attachment in email.attachments {
+                    modelContext.insert(attachment)
+                }
+                
                 newMessageCount += 1
                 
                 // Always update conversation metadata for received messages

@@ -38,6 +38,21 @@ class GmailService: ObservableObject {
             do {
                 let gmailMessage = try await apiClient.fetchMessage(messageId: messageId)
                 if let email = MessageParserService.parseGmailMessage(gmailMessage) {
+                    // Fetch attachment data for each attachment
+                    for attachment in email.attachments {
+                        if attachment.data == nil && !attachment.id.isEmpty {
+                            do {
+                                let attachmentData = try await apiClient.fetchAttachment(
+                                    messageId: email.messageId,
+                                    attachmentId: attachment.id
+                                )
+                                attachment.data = attachmentData
+                                print("✅ Downloaded attachment: \(attachment.filename) (\(attachment.formattedSize))")
+                            } catch {
+                                print("❌ Failed to fetch attachment \(attachment.filename): \(error)")
+                            }
+                        }
+                    }
                     emails.append(email)
                 }
             } catch {
@@ -52,8 +67,8 @@ class GmailService: ObservableObject {
     
     // MARK: - Send Email
     
-    func sendEmail(to recipientEmail: String, body: String) async throws {
-        print("🚀 Starting email send to: \(recipientEmail)")
+    func sendEmail(to recipientEmail: String, body: String, attachments: [(filename: String, data: Data, mimeType: String)] = []) async throws {
+        print("🚀 Starting email send to: \(recipientEmail) with \(attachments.count) attachments")
         
         guard isAuthenticated else {
             throw GmailError.notAuthenticated
@@ -79,7 +94,8 @@ class GmailService: ObservableObject {
         let messageBuilder = EmailMessageBuilder(
             from: userEmail,
             to: recipientEmail,
-            body: body
+            body: body,
+            attachments: attachments
         )
         
         do {

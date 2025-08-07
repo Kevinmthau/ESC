@@ -14,6 +14,7 @@ struct ESCApp: App {
         let schema = Schema([
             Email.self,
             Conversation.self,
+            Attachment.self,
         ])
         let modelConfiguration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)
 

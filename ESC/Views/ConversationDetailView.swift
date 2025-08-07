@@ -10,6 +10,7 @@ struct ConversationDetailView: View {
     @State private var messageText = ""
     @State private var recipientEmail = ""
     @State private var isSending = false
+    @State private var selectedAttachments: [(filename: String, data: Data, mimeType: String)] = []
     @State private var showingError = false
     @State private var errorMessage = ""
     @State private var scrollToId: String?
@@ -165,6 +166,7 @@ struct ConversationDetailView: View {
             // Message input
             MessageInputView(
                 messageText: $messageText,
+                selectedAttachments: $selectedAttachments,
                 isTextFieldFocused: $isTextFieldFocused,
                 onSend: sendMessage
             )
@@ -202,8 +204,27 @@ struct ConversationDetailView: View {
         )
         
         do {
-            emails = try modelContext.fetch(descriptor)
-            print("📧 LoadEmails: Loaded \(emails.count) emails for \(contactEmail)")
+            let fetchedEmails = try modelContext.fetch(descriptor)
+            
+            // Remove duplicates based on message content and timestamp
+            var uniqueEmails: [Email] = []
+            var seenMessages = Set<String>()
+            
+            for email in fetchedEmails {
+                // Create a unique key based on content and approximate timestamp
+                let timeKey = Int(email.timestamp.timeIntervalSince1970 / 10) // Round to 10 seconds
+                let uniqueKey = "\(email.isFromMe)_\(timeKey)_\(email.body.prefix(100))"
+                
+                if !seenMessages.contains(uniqueKey) {
+                    seenMessages.insert(uniqueKey)
+                    uniqueEmails.append(email)
+                } else {
+                    print("⚠️ LoadEmails: Skipping duplicate email \(email.id) with key: \(uniqueKey.prefix(50))...")
+                }
+            }
+            
+            emails = uniqueEmails
+            print("📧 LoadEmails: Loaded \(uniqueEmails.count) unique emails for \(contactEmail) (filtered from \(fetchedEmails.count) total)")
         } catch {
             print("❌ LoadEmails: Failed to fetch emails: \(error)")
             emails = []
@@ -227,7 +248,7 @@ struct ConversationDetailView: View {
     }
     
     private func sendMessage() {
-        guard !messageText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        guard !messageText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !selectedAttachments.isEmpty else { return }
         
         // For new conversations, validate recipient
         if isNewConversation {
@@ -243,8 +264,9 @@ struct ConversationDetailView: View {
         }
         
         isSending = true
-        let messageBody = messageText
+        let messageBody = messageText.isEmpty ? "(Attachment)" : messageText
         let recipient = isNewConversation ? recipientEmail : conversation.contactEmail
+        let attachments = selectedAttachments
         
         Task {
             do {
@@ -252,22 +274,28 @@ struct ConversationDetailView: View {
                 let userEmail: String
                 if gmailService.isAuthenticated {
                     userEmail = try await gmailService.getUserEmail()
-                    // Send via Gmail API
-                    try await gmailService.sendEmail(to: recipient, body: messageBody)
+                    // Send via Gmail API with attachments
+                    try await gmailService.sendEmail(to: recipient, body: messageBody, attachments: attachments)
                 } else {
                     userEmail = "me@example.com" // Fallback for offline mode
                 }
                 
-                // Create local email record with proper sender info
-                let email = createLocalEmail(body: messageBody, senderEmail: userEmail)
+                // Create local email record with proper sender info and attachments
+                let email = createLocalEmail(body: messageBody, senderEmail: userEmail, attachments: attachments)
                 
                 await MainActor.run {
-                    // Clear message text immediately for better UX
+                    // Clear message text and attachments immediately for better UX
                     messageText = ""
+                    selectedAttachments = []
                     isSending = false
                     
                     // Insert email first to ensure it's in the database
                     modelContext.insert(email)
+                    
+                    // Insert attachments
+                    for attachment in email.attachments {
+                        modelContext.insert(attachment)
+                    }
                     
                     // Add email to conversation and update conversation metadata
                     conversation.addEmail(email)
@@ -292,9 +320,13 @@ struct ConversationDetailView: View {
                         
                         print("✅ Saved sent message with ID: \(email.id), timestamp: \(email.timestamp)")
                         
-                        // Immediately add to local state for instant UI update
-                        emails.append(email)
-                        print("📧 Added email to local state. Now showing \(emails.count) emails")
+                        // Immediately add to local state for instant UI update (avoid duplicates)
+                        if !emails.contains(where: { $0.id == email.id }) {
+                            emails.append(email)
+                            print("📧 Added email to local state. Now showing \(emails.count) emails")
+                        } else {
+                            print("⚠️ Email already in local state, skipping addition")
+                        }
                         
                         // Trigger scroll to new message
                         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
@@ -327,8 +359,8 @@ struct ConversationDetailView: View {
         }
     }
     
-    private func createLocalEmail(body: String, senderEmail: String) -> Email {
-        return Email(
+    private func createLocalEmail(body: String, senderEmail: String, attachments: [(filename: String, data: Data, mimeType: String)]) -> Email {
+        let email = Email(
             id: UUID().uuidString,
             messageId: UUID().uuidString,
             threadId: UUID().uuidString,
@@ -343,6 +375,19 @@ struct ConversationDetailView: View {
             isFromMe: true,
             conversation: conversation
         )
+        
+        // Add attachments to the email
+        for attachment in attachments {
+            let attachmentModel = Attachment(
+                filename: attachment.filename,
+                mimeType: attachment.mimeType,
+                size: attachment.data.count,
+                data: attachment.data
+            )
+            email.attachments.append(attachmentModel)
+        }
+        
+        return email
     }
     
     private func handleError(_ error: Error) {

@@ -12,6 +12,11 @@ struct MessageCleaner {
         for line in lines {
             let trimmedLine = line.trimmingCharacters(in: .whitespacesAndNewlines)
             
+            // Skip attachment filename lines
+            if isAttachmentLine(trimmedLine) {
+                continue
+            }
+            
             // Check if this line starts a quoted section
             if isQuotedLine(trimmedLine) {
                 inQuotedSection = true
@@ -34,6 +39,47 @@ struct MessageCleaner {
         
         // Return original if cleaning resulted in empty string
         return result.isEmpty ? body : result
+    }
+    
+    private static func isAttachmentLine(_ line: String) -> Bool {
+        let trimmedLine = line.trimmingCharacters(in: .whitespacesAndNewlines)
+        
+        // Check for common attachment patterns
+        let attachmentPatterns = [
+            // [image: filename] pattern
+            #"^\[image:.*\]$"#,
+            // Common image file extensions at end of line
+            #"^.*\.(png|jpg|jpeg|gif|bmp|svg|webp|tiff?)$"#,
+            // Common document extensions at end of line
+            #"^.*\.(pdf|doc|docx|xls|xlsx|ppt|pptx|txt|csv)$"#,
+            // Common archive extensions at end of line
+            #"^.*\.(zip|rar|7z|tar|gz)$"#,
+            // Common video extensions at end of line
+            #"^.*\.(mp4|avi|mov|wmv|flv|mkv)$"#,
+            // Common audio extensions at end of line
+            #"^.*\.(mp3|wav|flac|aac|ogg|wma)$"#
+        ]
+        
+        for pattern in attachmentPatterns {
+            if let regex = try? NSRegularExpression(pattern: pattern, options: .caseInsensitive),
+               regex.firstMatch(in: trimmedLine, options: [], range: NSRange(location: 0, length: trimmedLine.count)) != nil {
+                return true
+            }
+        }
+        
+        // Check if line is just a filename with common patterns
+        if trimmedLine.contains(".") && !trimmedLine.contains(" ") {
+            let components = trimmedLine.split(separator: ".")
+            if components.count >= 2 {
+                let lastComponent = String(components.last ?? "").lowercased()
+                let commonExtensions = ["png", "jpg", "jpeg", "gif", "pdf", "doc", "docx", "xls", "xlsx", "zip", "mp4", "mp3"]
+                if commonExtensions.contains(lastComponent) {
+                    return true
+                }
+            }
+        }
+        
+        return false
     }
     
     private static func isQuotedLine(_ line: String) -> Bool {

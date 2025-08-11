@@ -31,166 +31,18 @@ struct ComposeView: View {
     var body: some View {
         NavigationView {
             VStack(spacing: 0) {
-                // To field with + button
-                VStack(spacing: 0) {
-                    HStack(spacing: 12) {
-                        Text("To:")
-                            .font(.body)
-                            .foregroundColor(.primary)
-                            .frame(width: 30, alignment: .leading)
-                        
-                        TextField("", text: $toEmail)
-                            .textFieldStyle(PlainTextFieldStyle())
-                            .keyboardType(.emailAddress)
-                            .autocorrectionDisabled()
-                            .textInputAutocapitalization(.never)
-                            .focused($isToFieldFocused)
-                            .onTapGesture {
-                                isEditingTo = true
-                                updateFilteredContacts()
-                            }
-                            .onChange(of: toEmail) { _, newValue in
-                                updateFilteredContacts()
-                            }
-                            .onChange(of: isToFieldFocused) { _, focused in
-                                isEditingTo = focused
-                                if focused {
-                                    updateFilteredContacts()
-                                }
-                            }
-                        
-                        Spacer()
-                        
-                        Button(action: {
-                            Task {
-                                if contactsService.authorizationStatus != .authorized {
-                                    _ = await contactsService.requestAccess()
-                                }
-                                if contactsService.authorizationStatus == .authorized {
-                                    await contactsService.fetchContacts()
-                                }
-                            }
-                        }) {
-                            Image(systemName: "plus.circle.fill")
-                                .font(.title2)
-                                .foregroundColor(.blue)
-                        }
-                    }
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 12)
-                    
-                    // Contact suggestions
-                    if isEditingTo && !filteredContacts.isEmpty {
-                        VStack(spacing: 0) {
-                            ForEach(filteredContacts.prefix(5), id: \.email) { contact in
-                                Button(action: {
-                                    toEmail = contact.email
-                                    isEditingTo = false
-                                    isToFieldFocused = false
-                                }) {
-                                    HStack {
-                                        ContactAvatarView(
-                                            email: contact.email,
-                                            name: contact.name,
-                                            contactsService: contactsService,
-                                            size: 32
-                                        )
-                                        
-                                        VStack(alignment: .leading, spacing: 2) {
-                                            Text(contact.name)
-                                                .font(.body)
-                                                .foregroundColor(.primary)
-                                            Text(contact.email)
-                                                .font(.caption)
-                                                .foregroundColor(.secondary)
-                                        }
-                                        
-                                        Spacer()
-                                    }
-                                    .padding(.horizontal, 16)
-                                    .padding(.vertical, 8)
-                                }
-                                .buttonStyle(PlainButtonStyle())
-                                
-                                if contact.email != filteredContacts.prefix(5).last?.email {
-                                    Divider()
-                                        .padding(.leading, 60)
-                                }
-                            }
-                        }
-                        .background(Color.white)
-                        .overlay(
-                            Rectangle()
-                                .stroke(Color.gray.opacity(0.2), lineWidth: 1)
-                        )
-                    }
-                    
-                    Divider()
-                        .background(Color.gray.opacity(0.3))
-                }
-                .background(Color.white)
-                
-                // Message input area at bottom
-                Spacer()
-                
-                // iMessage-style input bar
-                VStack(spacing: 0) {
-                    Divider()
-                        .background(Color.gray.opacity(0.3))
-                    
-                    HStack(spacing: 8) {
-                        // Text input
-                        TextField("", text: $messageText, axis: .vertical)
-                            .textFieldStyle(PlainTextFieldStyle())
-                            .font(.body)
-                            .lineLimit(1...6)
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 8)
-                            .background(Color.gray.opacity(0.1))
-                            .cornerRadius(20)
-                            .frame(minHeight: 36)
-                        
-                        // Send button
-                        if !messageText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                            Button(action: {
-                                print("🚀 ComposeView: Send button tapped!")
-                                sendMessage()
-                            }) {
-                                Image(systemName: "arrow.up.circle.fill")
-                                    .font(.title2)
-                                    .foregroundColor(.blue)
-                                    .frame(width: 32, height: 32)
-                            }
-                            .disabled(isSending || toEmail.isEmpty)
-                        }
-                    }
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 8)
-                    .background(Color.white)
-                }
+                toFieldSection
+                messageInputSection
             }
             .background(Color.white)
             .navigationTitle("New Message")
             .navigationBarTitleDisplayMode(.inline)
-            .onTapGesture {
-                isEditingTo = false
-                isToFieldFocused = false
-            }
             .onAppear {
-                // Auto-focus the To field when compose view appears
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                    isToFieldFocused = true
-                }
-                
-                // Request contacts access and fetch contacts
-                Task {
-                    if contactsService.authorizationStatus == .notDetermined {
-                        _ = await contactsService.requestAccess()
-                    }
-                    if contactsService.authorizationStatus == .authorized {
-                        await contactsService.fetchContacts()
-                    }
-                }
+                handleOnAppear()
+            }
+            .onChange(of: contactsService.contacts.count) { _, _ in
+                print("📱 ComposeView: Contacts list changed, updating filtered contacts...")
+                updateFilteredContacts()
             }
             .toolbar {
                 ToolbarItem(placement: .navigationBarLeading) {
@@ -204,6 +56,218 @@ struct ComposeView: View {
             Button("OK") { }
         } message: {
             Text(errorMessage)
+        }
+    }
+    
+    private var toFieldSection: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 12) {
+                Text("To:")
+                    .font(.body)
+                    .foregroundColor(.primary)
+                    .frame(width: 30, alignment: .leading)
+                
+                toEmailTextField
+                
+                Spacer()
+                
+                addContactButton
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
+                    
+            contactSuggestionsView
+            
+            Divider()
+                .background(Color.gray.opacity(0.3))
+        }
+        .background(Color.white)
+    }
+    
+    private var toEmailTextField: some View {
+        TextField("Email address", text: $toEmail)
+            .textFieldStyle(PlainTextFieldStyle())
+            .keyboardType(.emailAddress)
+            .autocorrectionDisabled()
+            .textInputAutocapitalization(.never)
+            .focused($isToFieldFocused)
+            .onChange(of: toEmail) { _, newValue in
+                print("📝 ComposeView: To field changed to: '\(newValue)'")
+                if isToFieldFocused {
+                    isEditingTo = true
+                }
+                updateFilteredContacts()
+                print("📝 ComposeView: Filtered contacts count: \(filteredContacts.count)")
+                print("📝 ComposeView: isEditingTo: \(isEditingTo)")
+            }
+            .onChange(of: isToFieldFocused) { _, focused in
+                print("🎯 ComposeView: To field focus changed to: \(focused)")
+                isEditingTo = focused
+                if focused {
+                    updateFilteredContacts()
+                    print("🎯 ComposeView: To field focused, showing suggestions")
+                } else {
+                    print("🎯 ComposeView: To field unfocused, hiding suggestions")
+                }
+            }
+    }
+    
+    private var addContactButton: some View {
+        Button(action: {
+            Task {
+                if contactsService.authorizationStatus != .authorized {
+                    _ = await contactsService.requestAccess()
+                }
+                if contactsService.authorizationStatus == .authorized {
+                    await contactsService.fetchContacts()
+                }
+            }
+        }) {
+            Image(systemName: "plus.circle.fill")
+                .font(.title2)
+                .foregroundColor(.blue)
+        }
+    }
+    
+    @ViewBuilder
+    private var contactSuggestionsView: some View {
+        if isEditingTo && filteredContacts.count > 0 {
+            VStack(spacing: 0) {
+                ForEach(filteredContacts.prefix(5), id: \.email) { contact in
+                    Button(action: {
+                        toEmail = contact.email
+                        isEditingTo = false
+                        isToFieldFocused = false
+                    }) {
+                        HStack {
+                            ContactAvatarView(
+                                email: contact.email,
+                                name: contact.name,
+                                contactsService: contactsService,
+                                size: 32
+                            )
+                            
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(contact.name)
+                                    .font(.body)
+                                    .foregroundColor(.primary)
+                                Text(contact.email)
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                            }
+                            
+                            Spacer()
+                        }
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 8)
+                    }
+                    .buttonStyle(PlainButtonStyle())
+                    
+                    if contact.email != filteredContacts.prefix(5).last?.email {
+                        Divider()
+                            .padding(.leading, 60)
+                    }
+                }
+            }
+            .background(Color.white)
+            .overlay(
+                Rectangle()
+                    .stroke(Color.gray.opacity(0.2), lineWidth: 1)
+            )
+        }
+    }
+    
+    private var messageInputSection: some View {
+        VStack(spacing: 0) {
+            // Message input area at bottom
+            Spacer()
+                .onTapGesture {
+                    isEditingTo = false
+                    isToFieldFocused = false
+                }
+            
+            // iMessage-style input bar
+            VStack(spacing: 0) {
+                Divider()
+                    .background(Color.gray.opacity(0.3))
+                
+                HStack(spacing: 8) {
+                    // Text input
+                    TextField("", text: $messageText, axis: .vertical)
+                        .textFieldStyle(PlainTextFieldStyle())
+                        .font(.body)
+                        .lineLimit(1...6)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 8)
+                        .background(Color.gray.opacity(0.1))
+                        .cornerRadius(20)
+                        .frame(minHeight: 36)
+                    
+                    // Send button
+                    if !messageText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        Button(action: {
+                            print("🚀 ComposeView: Send button tapped!")
+                            sendMessage()
+                        }) {
+                            Image(systemName: "arrow.up.circle.fill")
+                                .font(.title2)
+                                .foregroundColor(.blue)
+                                .frame(width: 32, height: 32)
+                        }
+                        .disabled(isSending || toEmail.isEmpty)
+                    }
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 8)
+                .background(Color.white)
+            }
+        }
+    }
+    
+    private func handleOnAppear() {
+        print("🚀 ComposeView: View appeared")
+        print("🚀 ComposeView: Current contacts count: \(contactsService.contacts.count)")
+        
+        // Auto-focus the To field when compose view appears
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+            isToFieldFocused = true
+            isEditingTo = true
+            print("🚀 ComposeView: Set focus and editing to true")
+        }
+        
+        // Request contacts access and fetch contacts
+        Task {
+            print("📱 ComposeView: Checking contacts authorization...")
+            print("📱 ComposeView: Current auth status: \(contactsService.authorizationStatus.rawValue)")
+            
+            if contactsService.authorizationStatus == .notDetermined {
+                print("📱 ComposeView: Requesting contacts access...")
+                let granted = await contactsService.requestAccess()
+                print("📱 ComposeView: Access granted: \(granted)")
+            }
+            
+            if contactsService.authorizationStatus == .authorized {
+                print("📱 ComposeView: Fetching contacts...")
+                await contactsService.fetchContacts()
+                
+                // After fetching, update filtered contacts to show suggestions
+                await MainActor.run {
+                    print("📱 ComposeView: Contacts fetched, total: \(self.contactsService.contacts.count)")
+                    print("📱 ComposeView: Updating filtered list...")
+                    self.updateFilteredContacts()
+                    
+                    // Force another update after a short delay
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                        if self.isToFieldFocused {
+                            self.isEditingTo = true
+                            self.updateFilteredContacts()
+                            print("📱 ComposeView: Forced update of filtered contacts")
+                        }
+                    }
+                }
+            } else {
+                print("❌ ComposeView: Contacts not authorized: \(contactsService.authorizationStatus.rawValue)")
+            }
         }
     }
     
@@ -368,36 +432,56 @@ struct ComposeView: View {
     }
     
     private func updateFilteredContacts() {
-        let conversationContacts = conversations.map { (name: $0.contactName, email: $0.contactEmail) }
-        let addressBookContacts = contactsService.searchContacts(query: toEmail)
+        print("🔍 ComposeView: Updating filtered contacts...")
+        print("🔍 ComposeView: Total address book contacts: \(contactsService.contacts.count)")
+        print("🔍 ComposeView: Total conversations: \(conversations.count)")
+        print("🔍 ComposeView: isEditingTo: \(isEditingTo)")
         
-        // Combine and deduplicate contacts
+        // Combine all contacts from conversations and address book
         var allContacts: [(name: String, email: String)] = []
         var seenEmails = Set<String>()
         
         // Add conversation contacts first (recent/frequent)
-        for contact in conversationContacts {
-            if !seenEmails.contains(contact.email) {
-                allContacts.append(contact)
-                seenEmails.insert(contact.email)
+        for conversation in conversations {
+            let email = conversation.contactEmail.lowercased()
+            if !seenEmails.contains(email) && !email.isEmpty {
+                allContacts.append((name: conversation.contactName, email: conversation.contactEmail))
+                seenEmails.insert(email)
             }
         }
         
-        // Add address book contacts
-        for contact in addressBookContacts {
-            if !seenEmails.contains(contact.email) {
+        // Add all address book contacts
+        for contact in contactsService.contacts {
+            let email = contact.email.lowercased()
+            if !seenEmails.contains(email) && !email.isEmpty {
                 allContacts.append(contact)
-                seenEmails.insert(contact.email)
+                seenEmails.insert(email)
             }
         }
         
+        print("🔍 ComposeView: Combined total: \(allContacts.count) unique contacts")
+        
+        // Filter based on query
         if toEmail.isEmpty {
-            filteredContacts = Array(allContacts.prefix(5))
+            // Show first 10 contacts when field is empty but focused
+            filteredContacts = Array(allContacts.prefix(10))
+            print("🔍 ComposeView: Showing first 10 contacts for empty field")
         } else {
+            // Filter contacts that match the typed text
+            let query = toEmail.lowercased()
             filteredContacts = allContacts.filter { contact in
-                contact.name.localizedCaseInsensitiveContains(toEmail) ||
-                contact.email.localizedCaseInsensitiveContains(toEmail)
-            }.prefix(5).map { $0 }
+                contact.name.lowercased().contains(query) ||
+                contact.email.lowercased().contains(query)
+            }
+            print("🔍 ComposeView: Filtered to \(filteredContacts.count) matches for query: '\(toEmail)'")
+        }
+        
+        // Limit to 5 suggestions
+        filteredContacts = Array(filteredContacts.prefix(5))
+        
+        print("🔍 ComposeView: Final filtered contacts: \(filteredContacts.count)")
+        for contact in filteredContacts {
+            print("  - \(contact.name): \(contact.email)")
         }
     }
 }

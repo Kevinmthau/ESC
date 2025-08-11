@@ -33,10 +33,12 @@ class ContactsService: ObservableObject {
             return
         }
         
-        let keys = [CNContactGivenNameKey, CNContactFamilyNameKey, CNContactEmailAddressesKey, CNContactImageDataKey] as [CNKeyDescriptor]
+        let keys = [CNContactGivenNameKey, CNContactFamilyNameKey, CNContactEmailAddressesKey, CNContactImageDataKey, CNContactImageDataAvailableKey, CNContactThumbnailImageDataKey] as [CNKeyDescriptor]
         let request = CNContactFetchRequest(keysToFetch: keys)
         
         var fetchedContacts: [(name: String, email: String)] = []
+        var tempEmailToContactMap: [String: CNContact] = [:]
+        var tempPhotoCache: [String: UIImage] = [:]
         
         do {
             try contactStore.enumerateContacts(with: request) { contact, _ in
@@ -48,16 +50,31 @@ class ContactsService: ObservableObject {
                     fetchedContacts.append((name: displayName, email: email))
                     
                     // Store the contact in the email mapping for photo lookup
-                    emailToContactMap[email] = contact
+                    tempEmailToContactMap[email.lowercased()] = contact
+                    
+                    // Cache photo if available
+                    if contact.imageDataAvailable {
+                        if let imageData = contact.imageData ?? contact.thumbnailImageData,
+                           let image = UIImage(data: imageData) {
+                            tempPhotoCache[email.lowercased()] = image
+                        }
+                    }
                 }
             }
             
             let sortedContacts = fetchedContacts.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
             
+            // Create copies for use in MainActor context
+            let finalEmailMap = tempEmailToContactMap
+            let finalPhotoCache = tempPhotoCache
+            
             await MainActor.run {
                 self.contacts = sortedContacts
+                self.emailToContactMap = finalEmailMap
+                self.contactPhotoCache = finalPhotoCache
                 print("✅ ContactsService: Fetched \(self.contacts.count) contacts")
                 print("📧 ContactsService: Email mapping has \(self.emailToContactMap.count) entries")
+                print("🖼️ ContactsService: Cached \(self.contactPhotoCache.count) contact photos")
             }
             
         } catch {
@@ -75,25 +92,32 @@ class ContactsService: ObservableObject {
     }
     
     func getContactPhoto(for email: String) -> UIImage? {
+        let normalizedEmail = email.lowercased()
+        
         // Check cache first
-        if let cachedPhoto = contactPhotoCache[email] {
+        if let cachedPhoto = contactPhotoCache[normalizedEmail] {
             return cachedPhoto
         }
         
         // Look up contact and get photo
-        guard let contact = emailToContactMap[email],
-              let imageData = contact.imageData,
+        guard let contact = emailToContactMap[normalizedEmail] else {
+            return nil
+        }
+        
+        // Try to get image data (prefer full image over thumbnail)
+        guard let imageData = contact.imageData ?? contact.thumbnailImageData,
               let image = UIImage(data: imageData) else {
             return nil
         }
         
         // Cache the photo
-        contactPhotoCache[email] = image
+        contactPhotoCache[normalizedEmail] = image
         return image
     }
     
     func getContactName(for email: String) -> String? {
-        guard let contact = emailToContactMap[email] else { 
+        let normalizedEmail = email.lowercased()
+        guard let contact = emailToContactMap[normalizedEmail] else { 
             print("🔍 ContactsService: No contact found for email: \(email)")
             return nil 
         }

@@ -19,11 +19,26 @@ xcodebuild -project ESC.xcodeproj -scheme ESC -configuration Debug -destination 
 
 ### Testing
 ```bash
-# Run unit tests
+# Run all tests
 xcodebuild test -project ESC.xcodeproj -scheme ESC -destination 'platform=iOS Simulator,name=iPhone 16,OS=18.5'
 
-# UI tests only
+# Run unit tests only
+xcodebuild test -project ESC.xcodeproj -scheme ESC -destination 'platform=iOS Simulator,name=iPhone 16,OS=18.5' -only-testing:ESCTests
+
+# Run UI tests only
 xcodebuild test -project ESC.xcodeproj -scheme ESC -destination 'platform=iOS Simulator,name=iPhone 16,OS=18.5' -only-testing:ESCUITests
+
+# Run a specific test
+xcodebuild test -project ESC.xcodeproj -scheme ESC -destination 'platform=iOS Simulator,name=iPhone 16,OS=18.5' -only-testing:ESCTests/EmailTests/testEmailCreation
+```
+
+### Cleaning & Rebuilding
+```bash
+# Clean build folder
+xcodebuild clean -project ESC.xcodeproj -scheme ESC
+
+# Clean and build
+xcodebuild clean build -project ESC.xcodeproj -scheme ESC -configuration Debug -destination 'platform=iOS Simulator,name=iPhone 16,OS=18.5'
 ```
 
 ## Core Architecture
@@ -53,8 +68,8 @@ xcodebuild test -project ESC.xcodeproj -scheme ESC -destination 'platform=iOS Si
 
 ### Views (`ESC/Views/`)
 - `ConversationListView.swift`: Main inbox with Gmail integration and compose button
-- `ConversationDetailView.swift`: Chat interface with message bubbles and input
-- `ComposeView.swift`: iMessage-style compose with contact selection and live Gmail sending
+- `ConversationDetailView.swift`: Chat interface with message bubbles and input - **IMPORTANT: New message composition happens here, not in ComposeView**
+- `ComposeView.swift`: Standalone compose view (currently unused - new messages use ConversationDetailView)
 - `AuthenticationView.swift`: Google sign-in flow with error handling
 
 ### Services (`ESC/Services/`)
@@ -106,7 +121,7 @@ xcodebuild test -project ESC.xcodeproj -scheme ESC -destination 'platform=iOS Si
 
 ### Navigation Flow
 - **Main List**: Conversations sorted by last message timestamp with NavigationStack
-- **Compose**: Modal sheet with cancel/send, navigates to chat view after sending
+- **New Message**: Tapping compose creates empty Conversation and navigates to ConversationDetailView
 - **Chat View**: Full-screen conversation with navigation back button
 - **Authentication**: Modal sheet for Google sign-in
 - **Settings**: Modal sheet with account management options
@@ -147,9 +162,10 @@ The app uses a shared ModelContainer configured in `ESCApp.swift` with:
 ## Key Implementation Details
 
 ### Message Composition Flow
-- ComposeView accepts `onMessageSent` callback for navigation handling
-- After sending, automatically navigates to conversation detail view
-- Messages appear immediately in local storage before Gmail API confirmation
+- New messages: ConversationListView creates empty Conversation and navigates to ConversationDetailView
+- ConversationDetailView shows To: field with contact suggestions for new conversations (when contactEmail is empty)
+- Contact suggestions pull from both iOS Contacts and existing conversations
+- After sending, message appears immediately in local storage before Gmail API confirmation
 - Uses modern NavigationStack pattern for programmatic navigation
 
 ### Background Sync Architecture
@@ -160,6 +176,19 @@ The app uses a shared ModelContainer configured in `ESCApp.swift` with:
 
 ### Contact Photo System
 - ContactAvatarView handles photo loading and caching
-- Fallback initials use first letter of display name
+- ContactsService stores lowercase email keys for case-insensitive lookups
+- Fallback initials use first letter of display name with gradient backgrounds
 - Photo cache prevents repeated iOS Contacts API calls
-- Circular cropping with gradient backgrounds for consistency
+- Circular cropping with consistent sizing throughout app
+
+## Common Issues & Solutions
+
+### Contact Photos Not Showing
+- Verify ContactsService has fetched contacts (check logs for "✅ ContactsService: Fetched X contacts")
+- Email addresses are stored lowercase in emailToContactMap for case-insensitive lookups
+- Check iOS Settings > Privacy > Contacts for app permissions
+
+### New Message Composition
+- New messages use ConversationDetailView, not ComposeView
+- The To: field appears when `conversation.contactEmail.isEmpty`
+- Contact suggestions require ContactsService to have fetched contacts on view appearance

@@ -18,6 +18,9 @@ struct ConversationDetailView: View {
     @FocusState private var isRecipientFocused: Bool
     @State private var emails: [Email] = []
     @State private var refreshTrigger = 0
+    @State private var isEditingRecipient = false
+    @State private var filteredContacts: [(name: String, email: String)] = []
+    @Query private var conversations: [Conversation]
     
     private var conversationEmails: [Email] {
         let sorted = emails.sorted { $0.timestamp < $1.timestamp }
@@ -36,7 +39,31 @@ struct ConversationDetailView: View {
         VStack(spacing: 0) {
             // For new conversations, show recipient field
             if isNewConversation {
-                VStack(spacing: 0) {
+                recipientSection
+            } else {
+                // Contact header with profile picture for existing conversations
+                ContactHeaderView(
+                    conversation: conversation,
+                    contactsService: contactsService
+                )
+            }
+            
+            messageScrollView
+        }
+        .navigationBarTitleDisplayMode(.inline)
+        .navigationTitle(isNewConversation ? "New Message" : conversation.contactName)
+        .onDisappear {
+            handleOnDisappear()
+        }
+        .alert("Error", isPresented: $showingError) {
+            Button("OK", role: .cancel) { }
+        } message: {
+            Text(errorMessage)
+        }
+    }
+    
+    private var recipientSection: some View {
+        VStack(spacing: 0) {
                     HStack(spacing: 12) {
                         Text("To:")
                             .font(.body)
@@ -49,9 +76,27 @@ struct ConversationDetailView: View {
                             .autocorrectionDisabled()
                             .textInputAutocapitalization(.never)
                             .focused($isRecipientFocused)
+                            .onChange(of: recipientEmail) { _, newValue in
+                                isEditingRecipient = true
+                                updateFilteredContacts()
+                            }
+                            .onChange(of: isRecipientFocused) { _, focused in
+                                isEditingRecipient = focused
+                                if focused {
+                                    updateFilteredContacts()
+                                }
+                            }
                         
                         Button(action: {
-                            // TODO: Add contacts picker
+                            Task {
+                                if contactsService.authorizationStatus != .authorized {
+                                    _ = await contactsService.requestAccess()
+                                }
+                                if contactsService.authorizationStatus == .authorized {
+                                    await contactsService.fetchContacts()
+                                    updateFilteredContacts()
+                                }
+                            }
                         }) {
                             Image(systemName: "plus.circle.fill")
                                 .font(.title2)
@@ -61,19 +106,62 @@ struct ConversationDetailView: View {
                     .padding(.horizontal, 16)
                     .padding(.vertical, 12)
                     
-                    Divider()
-                        .background(Color.gray.opacity(0.3))
-                }
-                .background(Color.white)
-            } else {
-                // Contact header with profile picture for existing conversations
-                ContactHeaderView(
-                    conversation: conversation,
-                    contactsService: contactsService
-                )
-            }
-            
-            // Messages list
+                    // Contact suggestions dropdown
+                    if isEditingRecipient && !filteredContacts.isEmpty {
+                        VStack(spacing: 0) {
+                            ForEach(filteredContacts.prefix(5), id: \.email) { contact in
+                                Button(action: {
+                                    recipientEmail = contact.email
+                                    conversation.contactEmail = contact.email
+                                    conversation.contactName = contact.name
+                                    isEditingRecipient = false
+                                    isRecipientFocused = false
+                                }) {
+                                    HStack {
+                                        ContactAvatarView(
+                                            email: contact.email,
+                                            name: contact.name,
+                                            contactsService: contactsService,
+                                            size: 32
+                                        )
+                                        
+                                        VStack(alignment: .leading, spacing: 2) {
+                                            Text(contact.name)
+                                                .font(.body)
+                                                .foregroundColor(.primary)
+                                            Text(contact.email)
+                                                .font(.caption)
+                                                .foregroundColor(.secondary)
+                                        }
+                                        
+                                        Spacer()
+                                    }
+                                    .padding(.horizontal, 16)
+                                    .padding(.vertical, 8)
+                                }
+                                .buttonStyle(PlainButtonStyle())
+                                
+                                if contact.email != filteredContacts.prefix(5).last?.email {
+                                    Divider()
+                                        .padding(.leading, 60)
+                                }
+                            }
+                        }
+                        .background(Color.white)
+                        .overlay(
+                            Rectangle()
+                                .stroke(Color.gray.opacity(0.2), lineWidth: 1)
+                        )
+                    }
+                    
+            Divider()
+                .background(Color.gray.opacity(0.3))
+        }
+        .background(Color.white)
+    }
+    
+    private var messageScrollView: some View {
+        VStack(spacing: 0) {
             ScrollViewReader { proxy in
                 ScrollView {
                     if isNewConversation {
@@ -98,6 +186,16 @@ struct ConversationDetailView: View {
                 }
                 .background(Color.white)
                 .onAppear {
+                    // Request contacts access and fetch contacts
+                    Task {
+                        if contactsService.authorizationStatus == .notDetermined {
+                            _ = await contactsService.requestAccess()
+                        }
+                        if contactsService.authorizationStatus == .authorized {
+                            await contactsService.fetchContacts()
+                        }
+                    }
+                    
                     if !isNewConversation {
                         loadEmails()
                         markAsRead()
@@ -115,7 +213,14 @@ struct ConversationDetailView: View {
                         // Focus the recipient field for new conversations
                         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
                             isRecipientFocused = true
+                            isEditingRecipient = true
+                            updateFilteredContacts()
                         }
+                    }
+                }
+                .onChange(of: contactsService.contacts.count) { _, _ in
+                    if isNewConversation && isEditingRecipient {
+                        updateFilteredContacts()
                     }
                 }
                 .onChange(of: scrollToId) { _, newValue in
@@ -171,26 +276,10 @@ struct ConversationDetailView: View {
                 onSend: sendMessage
             )
         }
-        .background(Color.white)
-        .navigationTitle(isNewConversation ? "New Message" : "")
-        .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            if isNewConversation {
-                ToolbarItem(placement: .navigationBarLeading) {
-                    Button("Cancel") {
-                        dismiss()
-                    }
-                }
-            }
-        }
-        .alert("Error", isPresented: $showingError) {
-            Button("OK") {
-                showingError = false
-                errorMessage = ""
-            }
-        } message: {
-            Text(errorMessage)
-        }
+    }
+    
+    private func handleOnDisappear() {
+        // Save any unsent draft for new conversations if needed
     }
     
     private func loadEmails() {
@@ -388,6 +477,46 @@ struct ConversationDetailView: View {
         }
         
         return email
+    }
+    
+    private func updateFilteredContacts() {
+        // Combine all contacts from conversations and address book
+        var allContacts: [(name: String, email: String)] = []
+        var seenEmails = Set<String>()
+        
+        // Add conversation contacts first (recent/frequent)
+        for conversation in conversations {
+            let email = conversation.contactEmail.lowercased()
+            if !seenEmails.contains(email) && !email.isEmpty {
+                allContacts.append((name: conversation.contactName, email: conversation.contactEmail))
+                seenEmails.insert(email)
+            }
+        }
+        
+        // Add all address book contacts
+        for contact in contactsService.contacts {
+            let email = contact.email.lowercased()
+            if !seenEmails.contains(email) && !email.isEmpty {
+                allContacts.append(contact)
+                seenEmails.insert(email)
+            }
+        }
+        
+        // Filter based on query
+        if recipientEmail.isEmpty {
+            // Show first 10 contacts when field is empty but focused
+            filteredContacts = Array(allContacts.prefix(10))
+        } else {
+            // Filter contacts that match the typed text
+            let query = recipientEmail.lowercased()
+            filteredContacts = allContacts.filter { contact in
+                contact.name.lowercased().contains(query) ||
+                contact.email.lowercased().contains(query)
+            }
+        }
+        
+        // Limit to 5 suggestions
+        filteredContacts = Array(filteredContacts.prefix(5))
     }
     
     private func handleError(_ error: Error) {

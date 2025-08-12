@@ -5,6 +5,7 @@ struct MessageBubbleView: View {
     let email: Email
     @State private var htmlContentHeight: CGFloat = 100
     @State private var showingEmailReader = false
+    var onForward: ((Email) -> Void)?
     
     var body: some View {
         HStack {
@@ -16,6 +17,13 @@ struct MessageBubbleView: View {
                 Spacer(minLength: 50)
             }
         }
+        .contextMenu {
+            Button(action: {
+                onForward?(email)
+            }) {
+                Label("Forward", systemImage: "arrowshape.turn.up.right")
+            }
+        }
         .fullScreenCover(isPresented: $showingEmailReader) {
             EmailReaderView(email: email)
         }
@@ -24,8 +32,9 @@ struct MessageBubbleView: View {
     private var sentMessageBubble: some View {
         VStack(alignment: .trailing, spacing: 2) {
             VStack(alignment: .trailing, spacing: 8) {
-                // Show attachments if any
-                if !email.attachments.isEmpty {
+                // For forwarded messages, show attachments separately below
+                let isForwarded = isForwardedMessage()
+                if !email.attachments.isEmpty && !isForwarded {
                     attachmentsView(isFromMe: true)
                 }
                 
@@ -88,14 +97,21 @@ struct MessageBubbleView: View {
             
             timestampView
                 .padding(.trailing, 4)
+            
+            // Show attachments below bubble for forwarded messages
+            if !email.attachments.isEmpty && isForwardedMessage() {
+                attachmentsView(isFromMe: true)
+                    .padding(.top, 4)
+            }
         }
     }
     
     private var receivedMessageBubble: some View {
         VStack(alignment: .leading, spacing: 2) {
             VStack(alignment: .leading, spacing: 8) {
-                // Show attachments if any
-                if !email.attachments.isEmpty {
+                // For forwarded messages, show attachments separately below
+                let isForwarded = isForwardedMessage()
+                if !email.attachments.isEmpty && !isForwarded {
                     attachmentsView(isFromMe: false)
                 }
                 
@@ -158,6 +174,12 @@ struct MessageBubbleView: View {
             
             timestampView
                 .padding(.leading, 4)
+            
+            // Show attachments below bubble for forwarded messages
+            if !email.attachments.isEmpty && isForwardedMessage() {
+                attachmentsView(isFromMe: false)
+                    .padding(.top, 4)
+            }
         }
     }
     
@@ -168,25 +190,116 @@ struct MessageBubbleView: View {
     }
     
     private func createPreviewText(from body: String) -> String {
-        // Clean the text and limit length for preview
-        let cleaned = MessageCleaner.cleanMessageBody(body)
-            .trimmingCharacters(in: .whitespacesAndNewlines)
+        // Check if this is a forwarded message
+        let bodyLower = body.lowercased()
+        let isForwarded = bodyLower.contains("---------- forwarded message") || 
+                         bodyLower.contains("-------- original message") ||
+                         bodyLower.contains("begin forwarded message")
         
-        // Remove excessive whitespace
-        let normalized = cleaned
-            .replacingOccurrences(of: "\n\n\n", with: "\n\n")
-            .replacingOccurrences(of: "  ", with: " ")
-        
-        // Create preview from first part of text
-        let lines = normalized.components(separatedBy: .newlines)
-        let nonEmptyLines = lines.filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
-        let preview = nonEmptyLines.prefix(3).joined(separator: " ")
-        
-        // Limit to reasonable length
-        if preview.count > 150 {
-            return String(preview.prefix(147)) + "..."
+        if isForwarded {
+            // For forwarded messages, show only the header info and user's message
+            let lines = body.components(separatedBy: .newlines)
+            var headerLines: [String] = []
+            var userMessage = ""
+            var inForwardedSection = false
+            
+            for line in lines {
+                let trimmedLine = line.trimmingCharacters(in: .whitespaces)
+                
+                // Check if we've hit the forwarded message delimiter
+                if trimmedLine.contains("---------- Forwarded message") || 
+                   trimmedLine.contains("-------- Original message") {
+                    inForwardedSection = true
+                    headerLines.append("📧 Forwarded message")
+                    continue
+                }
+                
+                // If we're in the forwarded section, look for headers
+                if inForwardedSection {
+                    if trimmedLine.starts(with: "From:") {
+                        // Extract just the name from "From: Name <email>"
+                        if let nameStart = trimmedLine.firstIndex(of: ":"),
+                           let emailStart = trimmedLine.firstIndex(of: "<") {
+                            let nameRange = trimmedLine.index(after: nameStart)..<emailStart
+                            let name = trimmedLine[nameRange].trimmingCharacters(in: .whitespaces)
+                            headerLines.append("From: \(name)")
+                        } else {
+                            headerLines.append(String(trimmedLine.prefix(50)))
+                        }
+                    } else if trimmedLine.starts(with: "Date:") {
+                        // Shorten the date
+                        if let dateStart = trimmedLine.firstIndex(of: ":") {
+                            let dateStr = trimmedLine[trimmedLine.index(after: dateStart)...]
+                                .trimmingCharacters(in: .whitespaces)
+                            // Try to extract just the date part
+                            let dateComponents = dateStr.split(separator: " ")
+                            if dateComponents.count >= 4 {
+                                let shortDate = dateComponents.prefix(4).joined(separator: " ")
+                                headerLines.append("Date: \(shortDate)")
+                            } else {
+                                headerLines.append("Date: \(dateStr.prefix(20))")
+                            }
+                        }
+                    } else if trimmedLine.starts(with: ">") {
+                        // We've hit the actual forwarded content, stop here
+                        break
+                    }
+                } else if !trimmedLine.isEmpty && !inForwardedSection {
+                    // This is the user's message before the forward
+                    userMessage += trimmedLine + " "
+                }
+            }
+            
+            // Format the preview for forwarded messages
+            var preview = ""
+            
+            // Add user's message at the top if present
+            if !userMessage.trimmingCharacters(in: .whitespaces).isEmpty {
+                preview = String(userMessage.prefix(150)).trimmingCharacters(in: .whitespaces)
+                if !headerLines.isEmpty {
+                    preview += "\n\n"
+                }
+            }
+            
+            // Add the forward headers
+            if !headerLines.isEmpty {
+                preview += headerLines.joined(separator: "\n")
+            }
+            
+            // Note: The "View full message" button is added automatically by the calling code
+            // when isLikelyReplyEmail() returns false (which it does for forwarded messages)
+            
+            return preview.isEmpty ? "Forwarded message" : preview
+        } else {
+            // Original logic for non-forwarded messages
+            let cleaned = MessageCleaner.cleanMessageBody(body)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            
+            // Remove excessive whitespace
+            let normalized = cleaned
+                .replacingOccurrences(of: "\n\n\n", with: "\n\n")
+                .replacingOccurrences(of: "  ", with: " ")
+            
+            // Create preview from first part of text
+            let lines = normalized.components(separatedBy: .newlines)
+            let nonEmptyLines = lines.filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
+            let preview = nonEmptyLines.prefix(3).joined(separator: " ")
+            
+            // Limit to reasonable length
+            if preview.count > 150 {
+                return String(preview.prefix(147)) + "..."
+            }
+            return preview.isEmpty ? "View message content" : preview
         }
-        return preview.isEmpty ? "View message content" : preview
+    }
+    
+    private func isForwardedMessage() -> Bool {
+        let bodyLower = email.body.lowercased()
+        return bodyLower.contains("---------- forwarded message") || 
+               bodyLower.contains("-------- original message") ||
+               bodyLower.contains("begin forwarded message") ||
+               bodyLower.contains("fwd:") ||
+               bodyLower.contains("fw:")
     }
     
     private func isLikelyReplyEmail() -> Bool {

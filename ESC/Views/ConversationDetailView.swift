@@ -22,6 +22,9 @@ struct ConversationDetailView: View {
     @State private var filteredContacts: [(name: String, email: String)] = []
     @State private var hasScrolledToBottom = false
     @Query private var conversations: [Conversation]
+    @State private var forwardedEmail: Email?
+    @State private var showingForwardCompose = false
+    @State private var keyboardHeight: CGFloat = 0
     
     private var conversationEmails: [Email] {
         let sorted = emails.sorted { $0.timestamp < $1.timestamp }
@@ -59,6 +62,15 @@ struct ConversationDetailView: View {
             Button("OK", role: .cancel) { }
         } message: {
             Text(errorMessage)
+        }
+        .sheet(isPresented: $showingForwardCompose) {
+            if let emailToForward = forwardedEmail {
+                ForwardComposeView(
+                    originalEmail: emailToForward,
+                    gmailService: gmailService,
+                    modelContext: modelContext
+                )
+            }
         }
     }
     
@@ -180,8 +192,10 @@ struct ConversationDetailView: View {
                                 .id("top")
                             
                             ForEach(conversationEmails, id: \.id) { email in
-                                MessageBubbleView(email: email)
-                                    .id(email.id)
+                                MessageBubbleView(email: email) { emailToForward in
+                                    handleForwardEmail(emailToForward)
+                                }
+                                .id(email.id)
                             }
                             
                             // Add invisible spacer at bottom for better scroll behavior
@@ -191,9 +205,23 @@ struct ConversationDetailView: View {
                         }
                         .padding(.horizontal, 16)
                         .padding(.vertical, 8)
+                        .padding(.bottom, keyboardHeight > 0 ? 20 : 0)
                     }
                 }
                 .background(Color.white)
+                .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { notification in
+                    guard let keyboardValue = notification.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? NSValue else { return }
+                    let keyboardFrame = keyboardValue.cgRectValue
+                    withAnimation(.easeInOut(duration: 0.25)) {
+                        keyboardHeight = keyboardFrame.height
+                    }
+                }
+                .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in
+                    withAnimation(.easeInOut(duration: 0.25)) {
+                        keyboardHeight = 0
+                    }
+                }
+                .scrollDismissesKeyboard(.interactively)
                 .onAppear {
                     // Request contacts access and fetch contacts
                     Task {
@@ -248,10 +276,12 @@ struct ConversationDetailView: View {
                 }
                 .onChange(of: isTextFieldFocused) { _, focused in
                     if focused {
-                        // Scroll to bottom when text field is focused
-                        if let lastEmail = conversationEmails.last {
-                            withAnimation(.easeOut(duration: 0.3)) {
-                                proxy.scrollTo(lastEmail.id, anchor: .bottom)
+                        // Delay to let keyboard start showing
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+                            if let lastEmail = conversationEmails.last {
+                                withAnimation(.easeInOut(duration: 0.25)) {
+                                    proxy.scrollTo(lastEmail.id, anchor: .bottom)
+                                }
                             }
                         }
                     }
@@ -264,9 +294,7 @@ struct ConversationDetailView: View {
                         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
                             if let lastEmail = conversationEmails.last {
                                 print("📍 ScrollToBottom: Scrolling to \(lastEmail.id)")
-                                withAnimation(.easeOut(duration: 0.2)) {
-                                    proxy.scrollTo(lastEmail.id, anchor: .bottom)
-                                }
+                                proxy.scrollTo(lastEmail.id, anchor: .bottom)
                                 hasScrolledToBottom = true
                             }
                         }
@@ -494,6 +522,11 @@ struct ConversationDetailView: View {
         }
         
         return email
+    }
+    
+    private func handleForwardEmail(_ email: Email) {
+        forwardedEmail = email
+        showingForwardCompose = true
     }
     
     private func updateFilteredContacts() {

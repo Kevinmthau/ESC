@@ -97,8 +97,15 @@ actor GmailAPIClient {
     }
     
     private func performRequest<T: Codable>(_ request: URLRequest, responseType: T.Type) async throws -> T {
+        // Configure URLSession with timeout settings
+        let configuration = URLSessionConfiguration.default
+        configuration.timeoutIntervalForRequest = 30.0  // 30 second timeout
+        configuration.timeoutIntervalForResource = 60.0  // 60 second resource timeout
+        configuration.waitsForConnectivity = true
+        let session = URLSession(configuration: configuration)
+        
         do {
-            let (data, response) = try await URLSession.shared.data(for: request)
+            let (data, response) = try await session.data(for: request)
             
             if let httpResponse = response as? HTTPURLResponse {
                 switch httpResponse.statusCode {
@@ -108,7 +115,7 @@ actor GmailAPIClient {
                     // Token expired, refresh and retry
                     try await authManager.refreshAccessToken()
                     let retryRequest = try await createAuthenticatedRequest(url: request.url!)
-                    let (retryData, retryResponse) = try await URLSession.shared.data(for: retryRequest)
+                    let (retryData, retryResponse) = try await session.data(for: retryRequest)
                     
                     if let retryHttpResponse = retryResponse as? HTTPURLResponse,
                        retryHttpResponse.statusCode >= 200 && retryHttpResponse.statusCode < 300 {

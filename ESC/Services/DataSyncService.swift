@@ -44,11 +44,32 @@ class DataSyncService: ObservableObject {
         // Stop any existing timer
         stopAutoSync()
         
+        // Track consecutive failures for backoff
+        var consecutiveFailures = 0
+        
         // Sync every 10 seconds for better responsiveness
         syncTimer = Timer.scheduledTimer(withTimeInterval: 10.0, repeats: true) { _ in
             Task { @MainActor in
                 if self.gmailService.isAuthenticated && !self.isSyncing {
+                    // Implement exponential backoff for consecutive failures
+                    if consecutiveFailures > 0 {
+                        let backoffInterval = min(60.0, 10.0 * pow(2.0, Double(consecutiveFailures - 1)))
+                        if Date().timeIntervalSince(self.lastSyncTime ?? Date.distantPast) < backoffInterval {
+                            print("⏸️ DataSyncService: Skipping sync due to backoff (failures: \(consecutiveFailures))")
+                            return
+                        }
+                    }
+                    
+                    let syncStartTime = Date()
                     await self.syncData(silent: true)
+                    
+                    // Check if sync was successful by comparing timestamps
+                    if self.lastSyncTime ?? Date.distantPast >= syncStartTime {
+                        consecutiveFailures = 0
+                    } else {
+                        consecutiveFailures += 1
+                        print("⚠️ DataSyncService: Sync may have failed, consecutive failures: \(consecutiveFailures)")
+                    }
                 }
             }
         }
@@ -240,7 +261,17 @@ class DataSyncService: ObservableObject {
             }
             
         } catch {
-            print("Sync error: \(error)")
+            // Log error with more context
+            if let networkError = error as? NetworkError {
+                print("🔴 DataSyncService: Network error during sync: \(networkError)")
+            } else if let gmailError = error as? GmailError {
+                print("🔴 DataSyncService: Gmail API error: \(gmailError)")
+            } else {
+                print("🔴 DataSyncService: Sync error: \(error)")
+            }
+            
+            // Don't stop auto-sync for transient errors
+            // The next sync attempt will retry
         }
     }
     

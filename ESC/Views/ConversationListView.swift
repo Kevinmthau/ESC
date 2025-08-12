@@ -214,6 +214,12 @@ struct ConversationListView: View {
                     refreshTrigger += 1
                 }
             }
+            .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("NavigateToConversation"))) { notification in
+                if let conversation = notification.object as? Conversation {
+                    // Navigate to the conversation after forwarding
+                    navigationPath.append(conversation)
+                }
+            }
         }
     }
     

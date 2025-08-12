@@ -8,6 +8,8 @@ struct MessageParserService {
         var senderEmail = ""
         var recipient = ""
         var recipientEmail = ""
+        var subject: String?
+        var inReplyToMessageId: String?
         
         // Extract headers
         for header in payload.headers ?? [] {
@@ -16,6 +18,12 @@ struct MessageParserService {
                 (sender, senderEmail) = EmailValidator.parseEmailAddress(header.value)
             case "to":
                 (recipient, recipientEmail) = EmailValidator.parseEmailAddress(header.value)
+            case "subject":
+                subject = header.value
+            case "in-reply-to":
+                // Extract message ID from angle brackets if present
+                let value = header.value
+                inReplyToMessageId = value.trimmingCharacters(in: CharacterSet(charactersIn: "<>"))
             default:
                 break
             }
@@ -40,7 +48,10 @@ struct MessageParserService {
             snippet: MessageCleaner.createCleanSnippet(plainBody),
             timestamp: timestamp,
             isRead: !(message.labelIds?.contains("UNREAD") ?? false),
-            isFromMe: message.labelIds?.contains("SENT") ?? false
+            isFromMe: message.labelIds?.contains("SENT") ?? false,
+            conversation: nil,
+            inReplyToMessageId: inReplyToMessageId,
+            subject: subject
         )
         
         // Create attachment objects (without data for now)

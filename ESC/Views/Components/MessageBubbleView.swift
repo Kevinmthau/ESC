@@ -6,6 +6,7 @@ struct MessageBubbleView: View {
     @State private var htmlContentHeight: CGFloat = 100
     @State private var showingEmailReader = false
     var onForward: ((Email) -> Void)?
+    var onReply: ((Email) -> Void)?
     
     var body: some View {
         HStack {
@@ -18,6 +19,12 @@ struct MessageBubbleView: View {
             }
         }
         .contextMenu {
+            Button(action: {
+                onReply?(email)
+            }) {
+                Label("Reply", systemImage: "arrowshape.turn.up.left")
+            }
+            
             Button(action: {
                 onForward?(email)
             }) {

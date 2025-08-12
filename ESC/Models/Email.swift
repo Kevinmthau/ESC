@@ -18,6 +18,8 @@ final class Email: @unchecked Sendable {
     var isFromMe: Bool
     var conversation: Conversation?
     var attachments: [Attachment] = []
+    var inReplyToMessageId: String?
+    var subject: String?
     
     init(
         id: String,
@@ -33,7 +35,9 @@ final class Email: @unchecked Sendable {
         timestamp: Date,
         isRead: Bool = false,
         isFromMe: Bool = false,
-        conversation: Conversation? = nil
+        conversation: Conversation? = nil,
+        inReplyToMessageId: String? = nil,
+        subject: String? = nil
     ) {
         self.id = id
         self.messageId = messageId
@@ -49,5 +53,7 @@ final class Email: @unchecked Sendable {
         self.isRead = isRead
         self.isFromMe = isFromMe
         self.conversation = conversation
+        self.inReplyToMessageId = inReplyToMessageId
+        self.subject = subject
     }
 }

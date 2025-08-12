@@ -25,6 +25,7 @@ struct ConversationDetailView: View {
     @State private var forwardedEmail: Email?
     @State private var showingForwardCompose = false
     @State private var keyboardHeight: CGFloat = 0
+    @State private var replyingToEmail: Email? = nil
     
     private var conversationEmails: [Email] {
         let sorted = emails.sorted { $0.timestamp < $1.timestamp }
@@ -192,9 +193,15 @@ struct ConversationDetailView: View {
                                 .id("top")
                             
                             ForEach(conversationEmails, id: \.id) { email in
-                                MessageBubbleView(email: email) { emailToForward in
-                                    handleForwardEmail(emailToForward)
-                                }
+                                MessageBubbleView(
+                                    email: email,
+                                    onForward: { emailToForward in
+                                        handleForwardEmail(emailToForward)
+                                    },
+                                    onReply: { emailToReply in
+                                        handleReplyToEmail(emailToReply)
+                                    }
+                                )
                                 .id(email.id)
                             }
                             
@@ -313,6 +320,11 @@ struct ConversationDetailView: View {
                 }
             }
             
+            // Reply preview if replying
+            if let replyEmail = replyingToEmail {
+                replyPreviewView(for: replyEmail)
+            }
+            
             // Message input
             MessageInputView(
                 messageText: $messageText,
@@ -401,6 +413,7 @@ struct ConversationDetailView: View {
         let messageBody = messageText.isEmpty ? "(Attachment)" : messageText
         let recipient = isNewConversation ? recipientEmail : conversation.contactEmail
         let attachments = selectedAttachments
+        let replyToEmail = replyingToEmail
         
         Task {
             do {
@@ -408,19 +421,37 @@ struct ConversationDetailView: View {
                 let userEmail: String
                 if gmailService.isAuthenticated {
                     userEmail = try await gmailService.getUserEmail()
-                    // Send via Gmail API with attachments
-                    try await gmailService.sendEmail(to: recipient, body: messageBody, attachments: attachments)
+                    // Send via Gmail API with attachments and reply headers if applicable
+                    if let replyTo = replyToEmail {
+                        print("📧 Sending reply - Original subject: '\(replyTo.subject ?? "nil")'")
+                        try await gmailService.sendEmail(
+                            to: recipient,
+                            body: messageBody,
+                            subject: replyTo.subject,
+                            inReplyTo: replyTo.messageId,
+                            attachments: attachments
+                        )
+                    } else {
+                        try await gmailService.sendEmail(to: recipient, body: messageBody, attachments: attachments)
+                    }
                 } else {
                     userEmail = "me@example.com" // Fallback for offline mode
                 }
                 
                 // Create local email record with proper sender info and attachments
-                let email = createLocalEmail(body: messageBody, senderEmail: userEmail, attachments: attachments)
+                let email = createLocalEmail(
+                    body: messageBody,
+                    senderEmail: userEmail,
+                    attachments: attachments,
+                    inReplyTo: replyToEmail?.messageId,
+                    subject: replyToEmail?.subject
+                )
                 
                 await MainActor.run {
                     // Clear message text and attachments immediately for better UX
                     messageText = ""
                     selectedAttachments = []
+                    replyingToEmail = nil
                     isSending = false
                     
                     // Insert email first to ensure it's in the database
@@ -493,7 +524,13 @@ struct ConversationDetailView: View {
         }
     }
     
-    private func createLocalEmail(body: String, senderEmail: String, attachments: [(filename: String, data: Data, mimeType: String)]) -> Email {
+    private func createLocalEmail(
+        body: String,
+        senderEmail: String,
+        attachments: [(filename: String, data: Data, mimeType: String)],
+        inReplyTo: String? = nil,
+        subject: String? = nil
+    ) -> Email {
         let email = Email(
             id: UUID().uuidString,
             messageId: UUID().uuidString,
@@ -507,7 +544,9 @@ struct ConversationDetailView: View {
             timestamp: Date(),
             isRead: true,
             isFromMe: true,
-            conversation: conversation
+            conversation: conversation,
+            inReplyToMessageId: inReplyTo,
+            subject: subject
         )
         
         // Add attachments to the email
@@ -527,6 +566,92 @@ struct ConversationDetailView: View {
     private func handleForwardEmail(_ email: Email) {
         forwardedEmail = email
         showingForwardCompose = true
+    }
+    
+    private func handleReplyToEmail(_ email: Email) {
+        print("📬 Reply to email - Subject: '\(email.subject ?? "nil")', MessageId: \(email.messageId)")
+        
+        // If the email doesn't have a subject, try to fetch it
+        if email.subject == nil || email.subject?.isEmpty == true {
+            print("⚠️ Email missing subject, attempting to fetch from Gmail...")
+            Task {
+                if let fetchedSubject = await fetchSubjectForEmail(email) {
+                    await MainActor.run {
+                        email.subject = fetchedSubject
+                        print("✅ Fetched subject: '\(fetchedSubject)'")
+                        do {
+                            try modelContext.save()
+                        } catch {
+                            print("❌ Failed to save subject: \(error)")
+                        }
+                    }
+                }
+            }
+        }
+        
+        replyingToEmail = email
+        isTextFieldFocused = true
+    }
+    
+    private func fetchSubjectForEmail(_ email: Email) async -> String? {
+        guard gmailService.isAuthenticated else { return nil }
+        
+        do {
+            // Fetch the specific message from Gmail to get its subject
+            let gmailMessage = try await gmailService.fetchMessage(messageId: email.messageId)
+            
+            // Extract subject from headers
+            if let payload = gmailMessage.payload,
+               let headers = payload.headers {
+                for header in headers {
+                    if header.name.lowercased() == "subject" {
+                        return header.value
+                    }
+                }
+            }
+        } catch {
+            print("❌ Failed to fetch subject for email \(email.messageId): \(error)")
+        }
+        
+        return nil
+    }
+    
+    @ViewBuilder
+    private func replyPreviewView(for email: Email) -> some View {
+        HStack(spacing: 8) {
+            Rectangle()
+                .fill(Color.blue)
+                .frame(width: 3)
+            
+            VStack(alignment: .leading, spacing: 4) {
+                HStack {
+                    Text("Replying to \(email.isFromMe ? "yourself" : email.sender)")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                    
+                    Spacer()
+                    
+                    Button(action: {
+                        replyingToEmail = nil
+                    }) {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                }
+                
+                Text(MessageCleaner.createCleanSnippet(email.body))
+                    .font(.caption)
+                    .foregroundColor(.primary)
+                    .lineLimit(2)
+                    .truncationMode(.tail)
+            }
+            .padding(.vertical, 8)
+            .padding(.trailing, 8)
+        }
+        .padding(.leading, 16)
+        .background(Color(.systemBackground))
+        .transition(.move(edge: .bottom).combined(with: .opacity))
     }
     
     private func updateFilteredContacts() {

@@ -7,14 +7,18 @@ struct EmailMessageBuilder {
     private let body: String
     private let date: Date
     private let attachments: [(filename: String, data: Data, mimeType: String)]
+    private let inReplyTo: String?
+    private let references: String?
     
-    init(from: String, to: String, subject: String = "(no subject)", body: String, date: Date = Date(), attachments: [(filename: String, data: Data, mimeType: String)] = []) {
+    init(from: String, to: String, subject: String = "(no subject)", body: String, date: Date = Date(), attachments: [(filename: String, data: Data, mimeType: String)] = [], inReplyTo: String? = nil, references: String? = nil) {
         self.from = from
         self.to = to
         self.subject = subject
         self.body = body
         self.date = date
         self.attachments = attachments
+        self.inReplyTo = inReplyTo
+        self.references = references
     }
     
     func buildRFC2822Message() -> String {
@@ -22,11 +26,23 @@ struct EmailMessageBuilder {
         
         if attachments.isEmpty {
             // Simple message without attachments
-            let message = """
+            var headers = """
             From: \(from)
             To: \(to)
             Subject: \(subject)
             Date: \(dateString)
+            """
+            
+            // Add reply headers if present
+            if let inReplyTo = inReplyTo {
+                headers += "\nIn-Reply-To: <\(inReplyTo)>"
+            }
+            if let references = references {
+                headers += "\nReferences: <\(references)>"
+            }
+            
+            let message = """
+            \(headers)
             MIME-Version: 1.0
             Content-Type: text/plain; charset=UTF-8
             Content-Transfer-Encoding: quoted-printable
@@ -39,11 +55,23 @@ struct EmailMessageBuilder {
             // Multipart message with attachments
             let boundary = "boundary_\(UUID().uuidString)"
             
-            var message = """
+            var headers = """
             From: \(from)
             To: \(to)
             Subject: \(subject)
             Date: \(dateString)
+            """
+            
+            // Add reply headers if present
+            if let inReplyTo = inReplyTo {
+                headers += "\nIn-Reply-To: <\(inReplyTo)>"
+            }
+            if let references = references {
+                headers += "\nReferences: <\(references)>"
+            }
+            
+            var message = """
+            \(headers)
             MIME-Version: 1.0
             Content-Type: multipart/mixed; boundary="\(boundary)"
 

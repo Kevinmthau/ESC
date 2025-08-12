@@ -67,8 +67,11 @@ class GmailService: ObservableObject {
     
     // MARK: - Send Email
     
-    func sendEmail(to recipientEmail: String, body: String, attachments: [(filename: String, data: Data, mimeType: String)] = []) async throws {
+    func sendEmail(to recipientEmail: String, body: String, subject: String? = nil, inReplyTo: String? = nil, attachments: [(filename: String, data: Data, mimeType: String)] = []) async throws {
         print("🚀 Starting email send to: \(recipientEmail) with \(attachments.count) attachments")
+        if let replyTo = inReplyTo {
+            print("📬 This is a reply to message: \(replyTo)")
+        }
         
         guard isAuthenticated else {
             throw GmailError.notAuthenticated
@@ -90,12 +93,33 @@ class GmailService: ObservableObject {
             throw error
         }
         
+        // Determine subject - use provided subject or generate reply subject
+        let emailSubject: String
+        if let subject = subject, !subject.isEmpty {
+            // If replying and subject doesn't start with "Re:", add it
+            if inReplyTo != nil && !subject.lowercased().hasPrefix("re:") {
+                emailSubject = "Re: \(subject)"
+            } else {
+                emailSubject = subject
+            }
+        } else if inReplyTo != nil {
+            // This is a reply but we don't have the subject - this shouldn't happen
+            // but if it does, at least mark it as a reply
+            print("⚠️ GmailService: Reply email missing subject! Using fallback.")
+            emailSubject = "Re: (no subject)"
+        } else {
+            emailSubject = "(no subject)"
+        }
+        
         // Create and validate email message
         let messageBuilder = EmailMessageBuilder(
             from: userEmail,
             to: recipientEmail,
+            subject: emailSubject,
             body: body,
-            attachments: attachments
+            attachments: attachments,
+            inReplyTo: inReplyTo,
+            references: inReplyTo  // For replies, references should include the message being replied to
         )
         
         do {
@@ -124,5 +148,15 @@ class GmailService: ObservableObject {
     func getUserEmail() async throws -> String {
         let profile = try await apiClient.getUserProfile()
         return profile.emailAddress
+    }
+    
+    // MARK: - Fetch Single Message
+    
+    func fetchMessage(messageId: String) async throws -> GmailMessage {
+        guard isAuthenticated else {
+            throw GmailError.notAuthenticated
+        }
+        
+        return try await apiClient.fetchMessage(messageId: messageId)
     }
 }

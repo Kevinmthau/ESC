@@ -10,6 +10,8 @@ import SwiftData
 
 @main
 struct ESCApp: App {
+    @StateObject private var contactsService = ContactsService.shared
+    
     var sharedModelContainer: ModelContainer = {
         let schema = Schema([
             Email.self,
@@ -28,6 +30,7 @@ struct ESCApp: App {
     var body: some Scene {
         WindowGroup {
             ContentView()
+                .environmentObject(contactsService)
         }
         .modelContainer(sharedModelContainer)
     }

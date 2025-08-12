@@ -21,5 +21,10 @@
 	<string>ESC needs access to your contacts to help you compose messages to people in your address book.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>ESC needs access to your photo library to attach images to your emails.</string>
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsArbitraryLoadsInWebContent</key>
+		<true/>
+	</dict>
 </dict>
 </plist>

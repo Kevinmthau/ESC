@@ -6,7 +6,7 @@ struct ConversationDetailView: View {
     @ObservedObject var gmailService: GmailService
     @Environment(\.modelContext) private var modelContext
     @Environment(\.dismiss) private var dismiss
-    @StateObject private var contactsService = ContactsService()
+    @EnvironmentObject private var contactsService: ContactsService
     @State private var messageText = ""
     @State private var recipientEmail = ""
     @State private var isSending = false
@@ -20,6 +20,7 @@ struct ConversationDetailView: View {
     @State private var refreshTrigger = 0
     @State private var isEditingRecipient = false
     @State private var filteredContacts: [(name: String, email: String)] = []
+    @State private var hasScrolledToBottom = false
     @Query private var conversations: [Conversation]
     
     private var conversationEmails: [Email] {
@@ -43,8 +44,7 @@ struct ConversationDetailView: View {
             } else {
                 // Contact header with profile picture for existing conversations
                 ContactHeaderView(
-                    conversation: conversation,
-                    contactsService: contactsService
+                    conversation: conversation
                 )
             }
             
@@ -121,7 +121,6 @@ struct ConversationDetailView: View {
                                         ContactAvatarView(
                                             email: contact.email,
                                             name: contact.name,
-                                            contactsService: contactsService,
                                             size: 32
                                         )
                                         
@@ -175,10 +174,20 @@ struct ConversationDetailView: View {
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                     } else {
                         LazyVStack(spacing: 8) {
+                            // Add invisible spacer at top to ensure proper scrolling
+                            Color.clear
+                                .frame(height: 1)
+                                .id("top")
+                            
                             ForEach(conversationEmails, id: \.id) { email in
                                 MessageBubbleView(email: email)
                                     .id(email.id)
                             }
+                            
+                            // Add invisible spacer at bottom for better scroll behavior
+                            Color.clear
+                                .frame(height: 1)
+                                .id("bottom")
                         }
                         .padding(.horizontal, 16)
                         .padding(.vertical, 8)
@@ -200,13 +209,19 @@ struct ConversationDetailView: View {
                         loadEmails()
                         markAsRead()
                         
-                        // Scroll to bottom after emails load with longer delay
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                        // Immediately scroll to bottom without animation for instant positioning
+                        if let lastEmail = conversationEmails.last {
+                            print("📍 OnAppear: Instant scroll to last email \(lastEmail.id)")
+                            proxy.scrollTo(lastEmail.id, anchor: .bottom)
+                        }
+                        
+                        // Then scroll again with animation after a delay to ensure content is loaded
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
                             if let lastEmail = conversationEmails.last {
-                                print("📍 OnAppear: Scrolling to last email \(lastEmail.id) at \(lastEmail.timestamp)")
-                                proxy.scrollTo(lastEmail.id, anchor: .bottom)
-                            } else {
-                                print("⚠️ OnAppear: No emails found to scroll to")
+                                print("📍 OnAppear: Animated scroll to last email \(lastEmail.id)")
+                                withAnimation(.easeOut(duration: 0.2)) {
+                                    proxy.scrollTo(lastEmail.id, anchor: .bottom)
+                                }
                             }
                         }
                     } else {
@@ -243,14 +258,16 @@ struct ConversationDetailView: View {
                 }
                 .onChange(of: emails.count) { oldCount, newCount in
                     print("📊 Email count changed from \(oldCount) to \(newCount)")
-                    if newCount > oldCount {
-                        // New email added, scroll to bottom
+                    
+                    // Scroll to bottom when emails first load or when new emails are added
+                    if (oldCount == 0 && newCount > 0) || newCount > oldCount {
                         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
                             if let lastEmail = conversationEmails.last {
                                 print("📍 ScrollToBottom: Scrolling to \(lastEmail.id)")
-                                withAnimation(.easeOut(duration: 0.3)) {
+                                withAnimation(.easeOut(duration: 0.2)) {
                                     proxy.scrollTo(lastEmail.id, anchor: .bottom)
                                 }
+                                hasScrolledToBottom = true
                             }
                         }
                     }

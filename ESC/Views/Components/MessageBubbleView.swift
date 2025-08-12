@@ -3,6 +3,8 @@ import QuickLook
 
 struct MessageBubbleView: View {
     let email: Email
+    @State private var htmlContentHeight: CGFloat = 100
+    @State private var showingEmailReader = false
     
     var body: some View {
         HStack {
@@ -13,6 +15,9 @@ struct MessageBubbleView: View {
                 receivedMessageBubble
                 Spacer(minLength: 50)
             }
+        }
+        .fullScreenCover(isPresented: $showingEmailReader) {
+            EmailReaderView(email: email)
         }
     }
     
@@ -26,12 +31,58 @@ struct MessageBubbleView: View {
                 
                 // Show text if not empty
                 if !email.body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    Text(MessageCleaner.cleanMessageBody(email.body))
-                        .padding(.horizontal, 16)
-                        .padding(.vertical, 10)
-                        .background(Color.blue)
-                        .foregroundColor(.white)
-                        .clipShape(RoundedRectangle(cornerRadius: 18))
+                    Group {
+                        if let htmlBody = email.htmlBody, !htmlBody.isEmpty {
+                            // Check if this is a reply or marketing email
+                            if isLikelyReplyEmail() {
+                                // For replies, just show the text without the button
+                                Text(createPreviewText(from: email.body))
+                                    .lineLimit(nil)
+                                    .multilineTextAlignment(.leading)
+                                    .padding(.horizontal, 16)
+                                    .padding(.vertical, 10)
+                                    .background(Color.blue)
+                                    .foregroundColor(.white)
+                                    .clipShape(RoundedRectangle(cornerRadius: 18))
+                            } else {
+                                // For marketing/newsletter emails, show preview with tap to expand
+                                Button(action: {
+                                    showingEmailReader = true
+                                }) {
+                                    VStack(alignment: .leading, spacing: 6) {
+                                        Text(createPreviewText(from: email.body))
+                                            .lineLimit(5)
+                                            .multilineTextAlignment(.leading)
+                                            .fixedSize(horizontal: false, vertical: true)
+                                        
+                                        HStack(spacing: 4) {
+                                            Image(systemName: "doc.richtext.fill")
+                                                .font(.caption)
+                                            Text("View full message")
+                                                .font(.caption)
+                                                .fontWeight(.medium)
+                                        }
+                                        .opacity(0.9)
+                                    }
+                                    .padding(.horizontal, 16)
+                                    .padding(.vertical, 12)
+                                    .frame(maxWidth: 280, alignment: .leading)
+                                    .background(Color.blue)
+                                    .foregroundColor(.white)
+                                    .clipShape(RoundedRectangle(cornerRadius: 18))
+                                }
+                                .buttonStyle(PlainButtonStyle())
+                            }
+                        } else {
+                            // Render plain text
+                            Text(MessageCleaner.cleanMessageBody(email.body))
+                                .padding(.horizontal, 16)
+                                .padding(.vertical, 10)
+                                .background(Color.blue)
+                                .foregroundColor(.white)
+                                .clipShape(RoundedRectangle(cornerRadius: 18))
+                        }
+                    }
                 }
             }
             
@@ -50,12 +101,58 @@ struct MessageBubbleView: View {
                 
                 // Show text if not empty
                 if !email.body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    Text(MessageCleaner.cleanMessageBody(email.body))
-                        .padding(.horizontal, 16)
-                        .padding(.vertical, 10)
-                        .background(Color(.systemGray5))
-                        .foregroundColor(.primary)
-                        .clipShape(RoundedRectangle(cornerRadius: 18))
+                    Group {
+                        if let htmlBody = email.htmlBody, !htmlBody.isEmpty {
+                            // Check if this is a reply or marketing email
+                            if isLikelyReplyEmail() {
+                                // For replies, just show the text without the button
+                                Text(createPreviewText(from: email.body))
+                                    .lineLimit(nil)
+                                    .multilineTextAlignment(.leading)
+                                    .padding(.horizontal, 16)
+                                    .padding(.vertical, 10)
+                                    .background(Color(.systemGray5))
+                                    .foregroundColor(.primary)
+                                    .clipShape(RoundedRectangle(cornerRadius: 18))
+                            } else {
+                                // For marketing/newsletter emails, show preview with tap to expand
+                                Button(action: {
+                                    showingEmailReader = true
+                                }) {
+                                    VStack(alignment: .leading, spacing: 6) {
+                                        Text(createPreviewText(from: email.body))
+                                            .lineLimit(5)
+                                            .multilineTextAlignment(.leading)
+                                            .fixedSize(horizontal: false, vertical: true)
+                                        
+                                        HStack(spacing: 4) {
+                                            Image(systemName: "doc.richtext.fill")
+                                                .font(.caption)
+                                            Text("View full message")
+                                                .font(.caption)
+                                                .fontWeight(.medium)
+                                        }
+                                        .opacity(0.8)
+                                    }
+                                    .padding(.horizontal, 16)
+                                    .padding(.vertical, 12)
+                                    .frame(maxWidth: 280, alignment: .leading)
+                                    .background(Color(.systemGray5))
+                                    .foregroundColor(.primary)
+                                    .clipShape(RoundedRectangle(cornerRadius: 18))
+                                }
+                                .buttonStyle(PlainButtonStyle())
+                            }
+                        } else {
+                            // Render plain text
+                            Text(MessageCleaner.cleanMessageBody(email.body))
+                                .padding(.horizontal, 16)
+                                .padding(.vertical, 10)
+                                .background(Color(.systemGray5))
+                                .foregroundColor(.primary)
+                                .clipShape(RoundedRectangle(cornerRadius: 18))
+                        }
+                    }
                 }
             }
             
@@ -68,6 +165,87 @@ struct MessageBubbleView: View {
         Text(email.timestamp, style: .time)
             .font(.caption2)
             .foregroundColor(.secondary)
+    }
+    
+    private func createPreviewText(from body: String) -> String {
+        // Clean the text and limit length for preview
+        let cleaned = MessageCleaner.cleanMessageBody(body)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        
+        // Remove excessive whitespace
+        let normalized = cleaned
+            .replacingOccurrences(of: "\n\n\n", with: "\n\n")
+            .replacingOccurrences(of: "  ", with: " ")
+        
+        // Create preview from first part of text
+        let lines = normalized.components(separatedBy: .newlines)
+        let nonEmptyLines = lines.filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
+        let preview = nonEmptyLines.prefix(3).joined(separator: " ")
+        
+        // Limit to reasonable length
+        if preview.count > 150 {
+            return String(preview.prefix(147)) + "..."
+        }
+        return preview.isEmpty ? "View message content" : preview
+    }
+    
+    private func isLikelyReplyEmail() -> Bool {
+        // Check if this is likely a simple reply email (not forwarded or marketing)
+        
+        let bodyLower = email.body.lowercased()
+        
+        // Check if it's a forwarded email - these should show the button
+        let forwardIndicators = [
+            "---------- forwarded message",
+            "-------- original message",
+            "begin forwarded message",
+            "fwd:",
+            "fw:"
+        ]
+        
+        for indicator in forwardIndicators {
+            if bodyLower.contains(indicator) {
+                return false // Forwarded emails should show the button
+            }
+        }
+        
+        // Short emails are likely simple replies
+        if email.body.count < 500 {
+            return true
+        }
+        
+        // Check for simple reply indicators
+        let replyIndicators = [
+            "on .* wrote:",
+            "sent from my",
+            "> on ",
+            ">> ",
+            "re:"
+        ]
+        
+        for indicator in replyIndicators {
+            if bodyLower.contains(indicator) && !bodyLower.contains("forwarded") {
+                return true
+            }
+        }
+        
+        // Check if HTML is minimal (just formatting, not marketing layout)
+        if let htmlBody = email.htmlBody {
+            // Marketing emails typically have lots of images, tables, and divs
+            let hasMarketingElements = htmlBody.contains("<table") && 
+                                       (htmlBody.contains("width=\"600") || 
+                                        htmlBody.contains("width:600") ||
+                                        htmlBody.contains("<img"))
+            
+            // Forwarded emails might have complex HTML
+            if bodyLower.contains("forward") || bodyLower.contains("fwd:") {
+                return false
+            }
+            
+            return !hasMarketingElements
+        }
+        
+        return false
     }
     
     @ViewBuilder

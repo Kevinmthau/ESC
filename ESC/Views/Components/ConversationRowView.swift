@@ -2,7 +2,7 @@ import SwiftUI
 
 struct ConversationRowView: View {
     let conversation: Conversation
-    let contactsService: ContactsService
+    @EnvironmentObject private var contactsService: ContactsService
     
     var body: some View {
         VStack(spacing: 0) {
@@ -26,7 +26,6 @@ struct ConversationRowView: View {
         ContactAvatarView(
             email: conversation.contactEmail,
             name: conversation.contactName,
-            contactsService: contactsService,
             size: 50
         )
     }
@@ -89,12 +88,12 @@ struct ConversationRowView: View {
                 contactEmail: "john@example.com",
                 lastMessageTimestamp: Date(),
                 lastMessageSnippet: "Hey, how are you doing today?"
-            ),
-            contactsService: ContactsService()
+            )
         )
         .listRowInsets(EdgeInsets())
         .listRowSeparator(.hidden)
         .listRowBackground(Color.white)
     }
     .listStyle(PlainListStyle())
+    .environmentObject(ContactsService.shared)
 }

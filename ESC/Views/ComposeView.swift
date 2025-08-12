@@ -17,7 +17,7 @@ struct ComposeView: View {
     
     @ObservedObject var gmailService: GmailService
     @Query private var conversations: [Conversation]
-    @StateObject private var contactsService = ContactsService()
+    @EnvironmentObject private var contactsService: ContactsService
     
     let onMessageSent: ((Conversation) -> Void)?
     let existingConversation: Conversation?
@@ -143,7 +143,6 @@ struct ComposeView: View {
                             ContactAvatarView(
                                 email: contact.email,
                                 name: contact.name,
-                                contactsService: contactsService,
                                 size: 32
                             )
                             

@@ -3,9 +3,9 @@ import SwiftUI
 struct ContactAvatarView: View {
     let email: String
     let name: String
-    let contactsService: ContactsService
     let size: CGFloat
     
+    @EnvironmentObject private var contactsService: ContactsService
     @State private var contactPhoto: UIImage?
     
     var body: some View {
@@ -44,7 +44,7 @@ struct ContactAvatarView: View {
     ContactAvatarView(
         email: "test@example.com",
         name: "Test User",
-        contactsService: ContactsService(),
         size: 50
     )
+    .environmentObject(ContactsService.shared)
 }

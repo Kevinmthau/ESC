@@ -4,14 +4,28 @@ import ContactsUI
 import SwiftUI
 
 class ContactsService: ObservableObject {
+    static let shared = ContactsService()
+    
     private let contactStore = CNContactStore()
     @Published var contacts: [(name: String, email: String)] = []
     @Published var authorizationStatus: CNAuthorizationStatus
     private var contactPhotoCache: [String: UIImage] = [:]
     private var emailToContactMap: [String: CNContact] = [:]
+    private let photoCacheDirectory: URL
+    private let photoCacheQueue = DispatchQueue(label: "com.esc.photocache", attributes: .concurrent)
     
     init() {
         self.authorizationStatus = CNContactStore.authorizationStatus(for: .contacts)
+        
+        // Set up persistent cache directory
+        let documentsPath = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
+        self.photoCacheDirectory = documentsPath.appendingPathComponent("ContactPhotoCache")
+        
+        // Create cache directory if it doesn't exist
+        try? FileManager.default.createDirectory(at: photoCacheDirectory, withIntermediateDirectories: true)
+        
+        // Load cached photos on initialization
+        loadCachedPhotos()
     }
     
     func requestAccess() async -> Bool {
@@ -52,11 +66,14 @@ class ContactsService: ObservableObject {
                     // Store the contact in the email mapping for photo lookup
                     tempEmailToContactMap[email.lowercased()] = contact
                     
-                    // Cache photo if available
+                    // Cache photo if available and save to disk
                     if contact.imageDataAvailable {
                         if let imageData = contact.imageData ?? contact.thumbnailImageData,
                            let image = UIImage(data: imageData) {
-                            tempPhotoCache[email.lowercased()] = image
+                            let normalizedEmail = email.lowercased()
+                            tempPhotoCache[normalizedEmail] = image
+                            // Also save to disk for persistence
+                            self.savePhotoToDisk(image, for: normalizedEmail)
                         }
                     }
                 }
@@ -94,9 +111,16 @@ class ContactsService: ObservableObject {
     func getContactPhoto(for email: String) -> UIImage? {
         let normalizedEmail = email.lowercased()
         
-        // Check cache first
+        // Check memory cache first
         if let cachedPhoto = contactPhotoCache[normalizedEmail] {
             return cachedPhoto
+        }
+        
+        // Check disk cache
+        if let diskPhoto = loadPhotoFromDisk(for: normalizedEmail) {
+            // Store in memory cache for faster access
+            contactPhotoCache[normalizedEmail] = diskPhoto
+            return diskPhoto
         }
         
         // Look up contact and get photo
@@ -110,8 +134,9 @@ class ContactsService: ObservableObject {
             return nil
         }
         
-        // Cache the photo
+        // Cache the photo in memory and disk
         contactPhotoCache[normalizedEmail] = image
+        savePhotoToDisk(image, for: normalizedEmail)
         return image
     }
     
@@ -125,5 +150,86 @@ class ContactsService: ObservableObject {
         let result = fullName.isEmpty ? nil : fullName
         print("✅ ContactsService: Found name '\(result ?? "nil")' for email: \(email)")
         return result
+    }
+    
+    // MARK: - Persistent Photo Caching
+    
+    private func loadCachedPhotos() {
+        photoCacheQueue.async(flags: .barrier) { [weak self] in
+            guard let self = self else { return }
+            
+            do {
+                let files = try FileManager.default.contentsOfDirectory(at: self.photoCacheDirectory, includingPropertiesForKeys: nil)
+                
+                for fileURL in files where fileURL.pathExtension == "png" {
+                    let email = fileURL.deletingPathExtension().lastPathComponent
+                    if let imageData = try? Data(contentsOf: fileURL),
+                       let image = UIImage(data: imageData) {
+                        DispatchQueue.main.async {
+                            self.contactPhotoCache[email] = image
+                        }
+                    }
+                }
+                
+                print("📷 ContactsService: Loaded \(files.count) cached photos from disk")
+            } catch {
+                print("❌ ContactsService: Error loading cached photos: \(error)")
+            }
+        }
+    }
+    
+    private func savePhotoToDisk(_ image: UIImage, for email: String) {
+        photoCacheQueue.async(flags: .barrier) { [weak self] in
+            guard let self = self else { return }
+            
+            let fileURL = self.photoCacheDirectory.appendingPathComponent("\(email).png")
+            
+            if let data = image.pngData() {
+                do {
+                    try data.write(to: fileURL)
+                    print("💾 ContactsService: Saved photo to disk for \(email)")
+                } catch {
+                    print("❌ ContactsService: Error saving photo to disk: \(error)")
+                }
+            }
+        }
+    }
+    
+    private func loadPhotoFromDisk(for email: String) -> UIImage? {
+        let fileURL = photoCacheDirectory.appendingPathComponent("\(email).png")
+        
+        guard FileManager.default.fileExists(atPath: fileURL.path) else {
+            return nil
+        }
+        
+        do {
+            let data = try Data(contentsOf: fileURL)
+            return UIImage(data: data)
+        } catch {
+            print("❌ ContactsService: Error loading photo from disk: \(error)")
+            return nil
+        }
+    }
+    
+    func clearPhotoCache() {
+        photoCacheQueue.async(flags: .barrier) { [weak self] in
+            guard let self = self else { return }
+            
+            // Clear memory cache
+            DispatchQueue.main.async {
+                self.contactPhotoCache.removeAll()
+            }
+            
+            // Clear disk cache
+            do {
+                let files = try FileManager.default.contentsOfDirectory(at: self.photoCacheDirectory, includingPropertiesForKeys: nil)
+                for file in files {
+                    try FileManager.default.removeItem(at: file)
+                }
+                print("🗑️ ContactsService: Cleared photo cache")
+            } catch {
+                print("❌ ContactsService: Error clearing photo cache: \(error)")
+            }
+        }
     }
 }

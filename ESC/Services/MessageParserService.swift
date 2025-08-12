@@ -22,7 +22,7 @@ struct MessageParserService {
         }
         
         // Extract body and attachments
-        let body = extractBody(from: payload)
+        let (plainBody, htmlBody) = extractBodies(from: payload)
         let attachmentInfos = extractAttachments(from: payload, messageId: message.id)
         
         let timestamp = Date(timeIntervalSince1970: (TimeInterval(message.internalDate ?? "0") ?? 0) / 1000)
@@ -35,8 +35,9 @@ struct MessageParserService {
             senderEmail: senderEmail,
             recipient: recipient,
             recipientEmail: recipientEmail,
-            body: body,
-            snippet: MessageCleaner.createCleanSnippet(body),
+            body: plainBody,
+            htmlBody: htmlBody,
+            snippet: MessageCleaner.createCleanSnippet(plainBody),
             timestamp: timestamp,
             isRead: !(message.labelIds?.contains("UNREAD") ?? false),
             isFromMe: message.labelIds?.contains("SENT") ?? false
@@ -56,7 +57,7 @@ struct MessageParserService {
         return email
     }
     
-    private static func extractBody(from payload: GmailPayload) -> String {
+    private static func extractBodies(from payload: GmailPayload) -> (plain: String, html: String?) {
         var textBody = ""
         var htmlBody = ""
         
@@ -90,29 +91,71 @@ struct MessageParserService {
         processPayload(payload)
         
         // Clean up the body text
-        var finalBody = ""
+        var finalPlainBody = ""
+        var finalHtmlBody: String? = nil
         
-        // Prefer plain text, fall back to HTML (stripped of tags)
+        // Process plain text
         if !textBody.isEmpty {
-            finalBody = textBody
+            finalPlainBody = textBody
         } else if !htmlBody.isEmpty {
-            // Basic HTML stripping
-            finalBody = htmlBody
-                .replacingOccurrences(of: "<[^>]+>", with: "", options: .regularExpression)
-                .replacingOccurrences(of: "&nbsp;", with: " ")
-                .replacingOccurrences(of: "&lt;", with: "<")
-                .replacingOccurrences(of: "&gt;", with: ">")
-                .replacingOccurrences(of: "&amp;", with: "&")
-                .replacingOccurrences(of: "&quot;", with: "\"")
-                .replacingOccurrences(of: "&#39;", with: "'")
-                .trimmingCharacters(in: .whitespacesAndNewlines)
+            // Create plain text from HTML by stripping tags
+            finalPlainBody = stripHTMLTags(from: htmlBody)
         } else if let body = payload.body?.data {
             // Handle simple message
-            finalBody = Base64Utils.decodeURLSafe(body)
+            let decoded = Base64Utils.decodeURLSafe(body)
+            if decoded.contains("<html>") || decoded.contains("<body>") {
+                finalHtmlBody = decoded
+                finalPlainBody = stripHTMLTags(from: decoded)
+            } else {
+                finalPlainBody = decoded
+            }
         }
         
+        // Store HTML body if available
+        if !htmlBody.isEmpty {
+            finalHtmlBody = htmlBody
+        }
+        
+        // Clean up plain text body
+        finalPlainBody = cleanPlainTextBody(finalPlainBody)
+        
+        return (finalPlainBody, finalHtmlBody)
+    }
+    
+    private static func stripHTMLTags(from html: String) -> String {
+        // More comprehensive HTML entity decoding
+        var text = html
+            .replacingOccurrences(of: "<br>", with: "\n", options: .caseInsensitive)
+            .replacingOccurrences(of: "<br/>", with: "\n", options: .caseInsensitive)
+            .replacingOccurrences(of: "<br />", with: "\n", options: .caseInsensitive)
+            .replacingOccurrences(of: "</p>", with: "\n\n", options: .caseInsensitive)
+            .replacingOccurrences(of: "</div>", with: "\n", options: .caseInsensitive)
+            .replacingOccurrences(of: "<[^>]+>", with: "", options: .regularExpression)
+            .replacingOccurrences(of: "&nbsp;", with: " ")
+            .replacingOccurrences(of: "&lt;", with: "<")
+            .replacingOccurrences(of: "&gt;", with: ">")
+            .replacingOccurrences(of: "&amp;", with: "&")
+            .replacingOccurrences(of: "&quot;", with: "\"")
+            .replacingOccurrences(of: "&#39;", with: "'")
+            .replacingOccurrences(of: "&apos;", with: "'")
+            .replacingOccurrences(of: "&mdash;", with: "—")
+            .replacingOccurrences(of: "&ndash;", with: "–")
+            .replacingOccurrences(of: "&hellip;", with: "...")
+            .replacingOccurrences(of: "&copy;", with: "©")
+            .replacingOccurrences(of: "&reg;", with: "®")
+            .replacingOccurrences(of: "&trade;", with: "™")
+        
+        // Clean up excessive whitespace
+        while text.contains("\n\n\n") {
+            text = text.replacingOccurrences(of: "\n\n\n", with: "\n\n")
+        }
+        
+        return text.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+    
+    private static func cleanPlainTextBody(_ body: String) -> String {
         // Remove any attachment filenames that might have leaked into the body
-        let lines = finalBody.components(separatedBy: .newlines)
+        let lines = body.components(separatedBy: .newlines)
         let cleanedLines = lines.filter { line in
             let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
             // Filter out lines that are just filenames or attachment indicators

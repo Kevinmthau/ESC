@@ -6,7 +6,7 @@ struct ConversationListView: View {
     @Query(sort: \Conversation.lastMessageTimestamp, order: .reverse) 
     private var allConversations: [Conversation]
     @StateObject private var gmailService = GmailService()
-    @StateObject private var contactsService = ContactsService()
+    @EnvironmentObject private var contactsService: ContactsService
     @State private var syncService: DataSyncService?
     @State private var showingAuth = false
     @State private var showingNewConversation = false
@@ -60,7 +60,7 @@ struct ConversationListView: View {
                 } else {
                     List(conversations) { conversation in
                         NavigationLink(value: conversation) {
-                            ConversationRowView(conversation: conversation, contactsService: contactsService)
+                            ConversationRowView(conversation: conversation)
                         }
                         .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
                         .listRowSeparator(.hidden)

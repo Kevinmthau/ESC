@@ -11,6 +11,7 @@ final class Email: @unchecked Sendable {
     var recipient: String
     var recipientEmail: String
     var body: String
+    var htmlBody: String?  // Store HTML version if available
     var snippet: String
     var timestamp: Date
     var isRead: Bool
@@ -27,6 +28,7 @@ final class Email: @unchecked Sendable {
         recipient: String,
         recipientEmail: String,
         body: String,
+        htmlBody: String? = nil,
         snippet: String,
         timestamp: Date,
         isRead: Bool = false,
@@ -41,6 +43,7 @@ final class Email: @unchecked Sendable {
         self.recipient = recipient
         self.recipientEmail = recipientEmail
         self.body = body
+        self.htmlBody = htmlBody
         self.snippet = snippet
         self.timestamp = timestamp
         self.isRead = isRead

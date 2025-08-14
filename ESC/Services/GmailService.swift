@@ -1,14 +1,25 @@
 import Foundation
 import SwiftData
+import Combine
 
 class GmailService: ObservableObject {
     private let authManager = GoogleAuthManager.shared
     private let apiClient = GmailAPIClient()
+    private var cancellables = Set<AnyCancellable>()
     
-    var isAuthenticated: Bool {
-        let authenticated = authManager.isAuthenticated
-        print("🔑 GmailService: isAuthenticated called, returning: \(authenticated)")
-        return authenticated
+    @Published var isAuthenticated: Bool = false
+    
+    init() {
+        // Subscribe to auth manager's authentication state
+        authManager.$isAuthenticated
+            .sink { [weak self] authenticated in
+                print("🔑 GmailService: Authentication state changed to: \(authenticated)")
+                self?.isAuthenticated = authenticated
+            }
+            .store(in: &cancellables)
+        
+        // Set initial state
+        isAuthenticated = authManager.isAuthenticated
     }
     
     func signOut() {

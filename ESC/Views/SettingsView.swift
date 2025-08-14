@@ -175,16 +175,47 @@ struct SettingsView: View {
     }
     
     private func signOutAndSwitchAccount() {
-        // Stop sync service first
-        syncService?.stopAutoSync()
-        
-        gmailService.signOut()
-        userEmail = ""
-        
-        // Notify parent view of auth change
-        onAuthChange?()
-        
-        showingAuth = true
+        Task { @MainActor in
+            do {
+                // Stop sync service first
+                syncService?.stopAutoSync()
+                
+                // Delete all emails from previous account
+                let emails = try modelContext.fetch(FetchDescriptor<Email>())
+                for email in emails {
+                    modelContext.delete(email)
+                }
+                
+                // Delete all conversations from previous account
+                let conversations = try modelContext.fetch(FetchDescriptor<Conversation>())
+                for conversation in conversations {
+                    modelContext.delete(conversation)
+                }
+                
+                // Delete all attachments
+                let attachments = try modelContext.fetch(FetchDescriptor<Attachment>())
+                for attachment in attachments {
+                    modelContext.delete(attachment)
+                }
+                
+                try modelContext.save()
+                
+                print("✅ SettingsView: Cleared all data from previous account")
+                
+                // Sign out from Gmail
+                gmailService.signOut()
+                userEmail = ""
+                
+                // Notify parent view of auth change
+                onAuthChange?()
+                
+                // Show auth screen for new account
+                showingAuth = true
+                
+            } catch {
+                print("❌ SettingsView: Failed to clear account data: \(error)")
+            }
+        }
     }
 }
 

@@ -15,6 +15,7 @@ struct ConversationListView: View {
     @State private var errorMessage: String?
     @State private var refreshTrigger = 0
     @State private var pendingNavigation: Conversation?
+    @State private var isInitialLoad = false
     
     private var conversations: [Conversation] {
         // Only show conversations that have messages
@@ -53,11 +54,39 @@ struct ConversationListView: View {
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .background(Color.white)
-                } else if syncService?.isSyncing == true && conversations.isEmpty {
-                    ProgressView("Loading emails...")
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        .background(Color.white)
+                } else if (syncService?.isSyncing == true || isInitialLoad) && conversations.isEmpty {
+                    // Show loading state when syncing or initial load
+                    VStack(spacing: 20) {
+                        ProgressView()
+                            .scaleEffect(1.5)
+                        Text("Loading emails...")
+                            .font(.headline)
+                            .foregroundColor(.secondary)
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background(Color.white)
+                } else if conversations.isEmpty {
+                    // Show empty state when no conversations
+                    VStack(spacing: 20) {
+                        Image(systemName: "tray")
+                            .font(.system(size: 60))
+                            .foregroundColor(.gray)
+                        Text("No messages")
+                            .font(.title2)
+                            .foregroundColor(.secondary)
+                        Text("Pull down to refresh")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background(Color.white)
+                    .refreshable {
+                        if gmailService.isAuthenticated {
+                            await syncService?.syncData()
+                        }
+                    }
                 } else {
+                    // Show conversations list
                     List(conversations) { conversation in
                         NavigationLink(value: conversation) {
                             ConversationRowView(conversation: conversation)
@@ -161,7 +190,25 @@ struct ConversationListView: View {
             .sheet(isPresented: $showingAuth) {
                 AuthenticationView(gmailService: gmailService) {
                     showingAuth = false
-                    syncService?.startAutoSync()
+                    
+                    // Set initial load state
+                    isInitialLoad = true
+                    
+                    // Initialize sync service if needed
+                    if syncService == nil {
+                        syncService = DataSyncService(modelContext: modelContext, gmailService: gmailService, contactsService: contactsService)
+                    }
+                    
+                    // Start syncing immediately after authentication
+                    Task {
+                        await syncService?.syncData()
+                        syncService?.startAutoSync()
+                        
+                        // Clear initial load state after sync completes
+                        await MainActor.run {
+                            isInitialLoad = false
+                        }
+                    }
                 }
             }
             .onChange(of: showingNewConversation) { _, newValue in

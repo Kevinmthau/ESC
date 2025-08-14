@@ -421,24 +421,33 @@ struct ConversationDetailView: View {
                 let userEmail: String
                 if gmailService.isAuthenticated {
                     userEmail = try await gmailService.getUserEmail()
+                    
+                    // Build message body with history for replies
+                    let bodyToSend = if let replyTo = replyToEmail {
+                        buildReplyBodyWithHistory(newMessage: messageBody, replyingTo: replyTo)
+                    } else {
+                        messageBody
+                    }
+                    
                     // Send via Gmail API with attachments and reply headers if applicable
                     if let replyTo = replyToEmail {
                         print("📧 Sending reply - Original subject: '\(replyTo.subject ?? "nil")'")
                         try await gmailService.sendEmail(
                             to: recipient,
-                            body: messageBody,
+                            body: bodyToSend,
                             subject: replyTo.subject,
                             inReplyTo: replyTo.messageId,
                             attachments: attachments
                         )
                     } else {
-                        try await gmailService.sendEmail(to: recipient, body: messageBody, attachments: attachments)
+                        try await gmailService.sendEmail(to: recipient, body: bodyToSend, attachments: attachments)
                     }
                 } else {
                     userEmail = "me@example.com" // Fallback for offline mode
                 }
                 
                 // Create local email record with proper sender info and attachments
+                // IMPORTANT: Use original messageBody (without history) for local storage
                 let email = createLocalEmail(
                     body: messageBody,
                     senderEmail: userEmail,
@@ -716,6 +725,116 @@ struct ConversationDetailView: View {
             return nameFromEmail
         }
         return email
+    }
+    
+    private func buildReplyBodyWithHistory(newMessage: String, replyingTo: Email?) -> String {
+        guard let replyingTo = replyingTo else {
+            return newMessage
+        }
+        
+        // Start with the new message
+        var fullBody = newMessage
+        
+        // Add separator for quoted content
+        fullBody += "\n\n"
+        
+        // Format the date for the email being replied to
+        let dateFormatter = DateFormatter()
+        dateFormatter.dateStyle = .medium
+        dateFormatter.timeStyle = .short
+        
+        // Add email header for the specific email being replied to
+        fullBody += "On \(dateFormatter.string(from: replyingTo.timestamp)), "
+        
+        if replyingTo.isFromMe {
+            fullBody += "you wrote:\n"
+        } else {
+            fullBody += "\(replyingTo.sender) wrote:\n"
+        }
+        
+        // Get the email content - use HTML if available, otherwise plain text
+        let emailContent: String
+        if let htmlBody = replyingTo.htmlBody, !htmlBody.isEmpty {
+            // Convert HTML to plain text while preserving structure
+            emailContent = convertHTMLToPlainText(htmlBody)
+        } else {
+            emailContent = replyingTo.body
+        }
+        
+        // Quote the email body with > prefix, preserving all line breaks
+        let lines = emailContent.components(separatedBy: "\n")
+        let quotedBody = lines.map { line in
+            // Don't add extra space after > for empty lines
+            if line.trimmingCharacters(in: .whitespaces).isEmpty {
+                return ">"
+            } else {
+                return "> \(line)"
+            }
+        }.joined(separator: "\n")
+        fullBody += quotedBody
+        
+        return fullBody
+    }
+    
+    private func convertHTMLToPlainText(_ html: String) -> String {
+        // Use NSAttributedString to convert HTML to plain text while preserving formatting
+        guard let data = html.data(using: .utf8) else {
+            return html
+        }
+        
+        do {
+            let options: [NSAttributedString.DocumentReadingOptionKey: Any] = [
+                .documentType: NSAttributedString.DocumentType.html,
+                .characterEncoding: String.Encoding.utf8.rawValue
+            ]
+            
+            let attributedString = try NSAttributedString(
+                data: data,
+                options: options,
+                documentAttributes: nil
+            )
+            
+            // Get the plain text with preserved formatting
+            return attributedString.string
+        } catch {
+            print("❌ Failed to convert HTML to plain text: \(error)")
+            // Fall back to basic HTML stripping
+            return stripBasicHTML(html)
+        }
+    }
+    
+    private func stripBasicHTML(_ html: String) -> String {
+        // Basic fallback HTML stripping
+        var text = html
+        
+        // Replace common HTML entities
+        text = text.replacingOccurrences(of: "&nbsp;", with: " ")
+        text = text.replacingOccurrences(of: "&amp;", with: "&")
+        text = text.replacingOccurrences(of: "&lt;", with: "<")
+        text = text.replacingOccurrences(of: "&gt;", with: ">")
+        text = text.replacingOccurrences(of: "&quot;", with: "\"")
+        text = text.replacingOccurrences(of: "&#39;", with: "'")
+        
+        // Replace <br> and <p> tags with newlines
+        text = text.replacingOccurrences(of: "<br>", with: "\n", options: .caseInsensitive)
+        text = text.replacingOccurrences(of: "<br/>", with: "\n", options: .caseInsensitive)
+        text = text.replacingOccurrences(of: "<br />", with: "\n", options: .caseInsensitive)
+        text = text.replacingOccurrences(of: "</p>", with: "\n\n", options: .caseInsensitive)
+        text = text.replacingOccurrences(of: "</div>", with: "\n", options: .caseInsensitive)
+        
+        // Remove all remaining HTML tags
+        let pattern = "<[^>]+>"
+        if let regex = try? NSRegularExpression(pattern: pattern, options: .caseInsensitive) {
+            let range = NSRange(location: 0, length: text.utf16.count)
+            text = regex.stringByReplacingMatches(in: text, options: [], range: range, withTemplate: "")
+        }
+        
+        // Clean up multiple consecutive newlines
+        while text.contains("\n\n\n") {
+            text = text.replacingOccurrences(of: "\n\n\n", with: "\n\n")
+        }
+        
+        return text.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 }
 

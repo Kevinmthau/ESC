@@ -9,7 +9,7 @@ class GmailService: ObservableObject {
     
     @Published var isAuthenticated: Bool = false
     private var cachedUserName: String?
-    private var cachedUserEmail: String?
+    var cachedUserEmail: String?  // Made public for DataSyncService
     
     init() {
         // Subscribe to auth manager's authentication state
@@ -89,8 +89,20 @@ class GmailService: ObservableObject {
     
     // MARK: - Send Email
     
+    // Single recipient convenience method (backward compatibility)
     func sendEmail(to recipientEmail: String, body: String, subject: String? = nil, inReplyTo: String? = nil, attachments: [(filename: String, data: Data, mimeType: String)] = []) async throws {
-        print("🚀 Starting email send to: \(recipientEmail) with \(attachments.count) attachments")
+        try await sendEmail(to: [recipientEmail], cc: [], bcc: [], body: body, subject: subject, inReplyTo: inReplyTo, attachments: attachments)
+    }
+    
+    // Multiple recipients support
+    func sendEmail(to recipients: [String], cc: [String] = [], bcc: [String] = [], body: String, subject: String? = nil, inReplyTo: String? = nil, attachments: [(filename: String, data: Data, mimeType: String)] = []) async throws {
+        print("🚀 Starting email send to: \(recipients.joined(separator: ", ")) with \(attachments.count) attachments")
+        if !cc.isEmpty {
+            print("📄 CC: \(cc.joined(separator: ", "))")
+        }
+        if !bcc.isEmpty {
+            print("🔒 BCC: \(bcc.joined(separator: ", "))")
+        }
         if let replyTo = inReplyTo {
             print("📬 This is a reply to message: \(replyTo)")
         }
@@ -99,9 +111,11 @@ class GmailService: ObservableObject {
             throw GmailError.notAuthenticated
         }
         
-        // Validate recipient email
-        guard EmailValidator.isValid(recipientEmail) else {
-            throw GmailError.invalidRecipient
+        // Validate all recipient emails
+        for recipient in recipients + cc + bcc {
+            guard EmailValidator.isValid(recipient) else {
+                throw GmailError.invalidRecipient
+            }
         }
         
         // Get user's email address and display name for From field
@@ -140,7 +154,9 @@ class GmailService: ObservableObject {
         
         let messageBuilder = EmailMessageBuilder(
             from: fromField,
-            to: recipientEmail,
+            to: recipients,
+            cc: cc,
+            bcc: bcc,
             subject: emailSubject,
             body: body,
             attachments: attachments,

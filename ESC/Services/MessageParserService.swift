@@ -6,8 +6,12 @@ struct MessageParserService {
         
         var sender = ""
         var senderEmail = ""
-        var recipient = ""
-        var recipientEmail = ""
+        var recipient = ""  // Primary recipient
+        var recipientEmail = ""  // Primary recipient email
+        var toRecipients: [String] = []
+        var ccRecipients: [String] = []
+        var bccRecipients: [String] = []
+        var allRecipients: [String] = []
         var subject: String?
         var inReplyToMessageId: String?
         var rfc2822MessageId: String?
@@ -18,7 +22,36 @@ struct MessageParserService {
             case "from":
                 (sender, senderEmail) = EmailValidator.parseEmailAddress(header.value)
             case "to":
-                (recipient, recipientEmail) = EmailValidator.parseEmailAddress(header.value)
+                // Parse multiple recipients in To field
+                let recipients = header.value.split(separator: ",").map { String($0).trimmingCharacters(in: .whitespaces) }
+                for recipientStr in recipients {
+                    let (_, email) = EmailValidator.parseEmailAddress(recipientStr)
+                    if !email.isEmpty {
+                        toRecipients.append(email.lowercased())
+                    }
+                }
+                // Set primary recipient as the first one
+                if let firstRecipient = recipients.first {
+                    (recipient, recipientEmail) = EmailValidator.parseEmailAddress(firstRecipient)
+                }
+            case "cc":
+                // Parse CC recipients
+                let recipients = header.value.split(separator: ",").map { String($0).trimmingCharacters(in: .whitespaces) }
+                for recipientStr in recipients {
+                    let (_, email) = EmailValidator.parseEmailAddress(recipientStr)
+                    if !email.isEmpty {
+                        ccRecipients.append(email.lowercased())
+                    }
+                }
+            case "bcc":
+                // Parse BCC recipients (rarely visible in received messages)
+                let recipients = header.value.split(separator: ",").map { String($0).trimmingCharacters(in: .whitespaces) }
+                for recipientStr in recipients {
+                    let (_, email) = EmailValidator.parseEmailAddress(recipientStr)
+                    if !email.isEmpty {
+                        bccRecipients.append(email.lowercased())
+                    }
+                }
             case "subject":
                 subject = header.value
             case "message-id":
@@ -49,6 +82,9 @@ struct MessageParserService {
             print("   RFC2822 Message-ID: \(rfc2822MessageId ?? "none")")
         }
         
+        // Combine all recipients
+        allRecipients = Array(Set(toRecipients + ccRecipients + bccRecipients))
+        
         let email = Email(
             id: message.id,
             messageId: messageIdentifier,
@@ -57,6 +93,10 @@ struct MessageParserService {
             senderEmail: senderEmail,
             recipient: recipient,
             recipientEmail: recipientEmail,
+            allRecipients: allRecipients,
+            toRecipients: toRecipients,
+            ccRecipients: ccRecipients,
+            bccRecipients: bccRecipients,
             body: plainBody,
             htmlBody: htmlBody,
             snippet: MessageCleaner.createCleanSnippet(plainBody),

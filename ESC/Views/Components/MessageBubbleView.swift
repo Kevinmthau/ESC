@@ -4,8 +4,10 @@ import QuickLook
 struct MessageBubbleView: View {
     let email: Email
     var allEmails: [Email] = []
+    var isGroupConversation: Bool = false
     @State private var htmlContentHeight: CGFloat = 100
     @State private var showingEmailReader = false
+    @EnvironmentObject private var contactsService: ContactsService
     var onForward: ((Email) -> Void)?
     var onReply: ((Email) -> Void)?
     
@@ -254,8 +256,23 @@ struct MessageBubbleView: View {
                 }
             }
             
-            timestampView
-                .padding(.leading, 4)
+            // Show timestamp with sender name for group conversations
+            HStack(spacing: 6) {
+                if isGroupConversation {
+                    Text(getSenderDisplayName())
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                    
+                    if let replyToName = getReplyToName(), replyToName != "You" {
+                        Text("• Reply to: \(replyToName)")
+                            .font(.caption2)
+                            .foregroundColor(.secondary)
+                    }
+                }
+                
+                timestampView
+            }
+            .padding(.leading, 4)
             
             // Show attachments below bubble for forwarded messages
             if !email.attachments.isEmpty && isForwardedMessage() {
@@ -455,6 +472,36 @@ struct MessageBubbleView: View {
                     AttachmentBubbleView(attachment: attachment, isFromMe: isFromMe)
                 }
             }
+        }
+    }
+    
+    private func getSenderDisplayName() -> String {
+        // Get sender name from contacts or use the sender field
+        if let contactName = contactsService.getContactName(for: email.senderEmail) {
+            return contactName
+        }
+        // If sender is an email address, extract the local part
+        if email.sender == email.senderEmail {
+            return email.senderEmail.split(separator: "@").first?.replacingOccurrences(of: ".", with: " ").capitalized ?? email.sender
+        }
+        return email.sender
+    }
+    
+    private func getReplyToName() -> String? {
+        guard let original = originalEmail else { return nil }
+        
+        // For group conversations, show who the reply is to
+        if original.isFromMe {
+            return "You"
+        } else {
+            if let contactName = contactsService.getContactName(for: original.senderEmail) {
+                return contactName
+            }
+            // Extract name from email or use sender name
+            if original.sender == original.senderEmail {
+                return original.senderEmail.split(separator: "@").first?.replacingOccurrences(of: ".", with: " ").capitalized ?? original.sender
+            }
+            return original.sender
         }
     }
 }

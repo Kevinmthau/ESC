@@ -2,7 +2,9 @@ import Foundation
 
 struct EmailMessageBuilder {
     private let from: String
-    private let to: String
+    private let to: [String]  // Changed to array for multiple recipients
+    private let cc: [String]
+    private let bcc: [String]
     private let subject: String
     private let body: String
     private let date: Date
@@ -10,15 +12,22 @@ struct EmailMessageBuilder {
     private let inReplyTo: String?
     private let references: String?
     
-    init(from: String, to: String, subject: String = "(no subject)", body: String, date: Date = Date(), attachments: [(filename: String, data: Data, mimeType: String)] = [], inReplyTo: String? = nil, references: String? = nil) {
+    init(from: String, to: [String], cc: [String] = [], bcc: [String] = [], subject: String = "(no subject)", body: String, date: Date = Date(), attachments: [(filename: String, data: Data, mimeType: String)] = [], inReplyTo: String? = nil, references: String? = nil) {
         self.from = from
         self.to = to
+        self.cc = cc
+        self.bcc = bcc
         self.subject = subject
         self.body = body
         self.date = date
         self.attachments = attachments
         self.inReplyTo = inReplyTo
         self.references = references
+    }
+    
+    // Convenience init for single recipient (backward compatibility)
+    init(from: String, to: String, subject: String = "(no subject)", body: String, date: Date = Date(), attachments: [(filename: String, data: Data, mimeType: String)] = [], inReplyTo: String? = nil, references: String? = nil) {
+        self.init(from: from, to: [to], cc: [], bcc: [], subject: subject, body: body, date: date, attachments: attachments, inReplyTo: inReplyTo, references: references)
     }
     
     func buildRFC2822Message() -> String {
@@ -28,10 +37,18 @@ struct EmailMessageBuilder {
             // Simple message without attachments
             var headers = """
             From: \(from)
-            To: \(to)
+            To: \(to.joined(separator: ", "))
             Subject: \(subject)
             Date: \(dateString)
             """
+            
+            // Add CC and BCC if present
+            if !cc.isEmpty {
+                headers += "\nCc: \(cc.joined(separator: ", "))"
+            }
+            if !bcc.isEmpty {
+                headers += "\nBcc: \(bcc.joined(separator: ", "))"
+            }
             
             // Add reply headers if present
             if let inReplyTo = inReplyTo {
@@ -57,10 +74,18 @@ struct EmailMessageBuilder {
             
             var headers = """
             From: \(from)
-            To: \(to)
+            To: \(to.joined(separator: ", "))
             Subject: \(subject)
             Date: \(dateString)
             """
+            
+            // Add CC and BCC if present
+            if !cc.isEmpty {
+                headers += "\nCc: \(cc.joined(separator: ", "))"
+            }
+            if !bcc.isEmpty {
+                headers += "\nBcc: \(bcc.joined(separator: ", "))"
+            }
             
             // Add reply headers if present
             if let inReplyTo = inReplyTo {
@@ -106,14 +131,33 @@ struct EmailMessageBuilder {
     func validate() throws {
         // Extract email from "Name <email@example.com>" format if present
         let fromEmail = extractEmailAddress(from: from)
-        let toEmail = extractEmailAddress(from: to)
         
         guard EmailValidator.isValid(fromEmail) else {
             throw GmailError.invalidMessageFormat
         }
         
-        guard EmailValidator.isValid(toEmail) else {
-            throw GmailError.invalidRecipient
+        // Validate all To recipients
+        for recipient in to {
+            let toEmail = extractEmailAddress(from: recipient)
+            guard EmailValidator.isValid(toEmail) else {
+                throw GmailError.invalidRecipient
+            }
+        }
+        
+        // Validate all CC recipients
+        for recipient in cc {
+            let ccEmail = extractEmailAddress(from: recipient)
+            guard EmailValidator.isValid(ccEmail) else {
+                throw GmailError.invalidRecipient
+            }
+        }
+        
+        // Validate all BCC recipients
+        for recipient in bcc {
+            let bccEmail = extractEmailAddress(from: recipient)
+            guard EmailValidator.isValid(bccEmail) else {
+                throw GmailError.invalidRecipient
+            }
         }
         
         guard !body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {

@@ -22,12 +22,26 @@ struct ConversationRowView: View {
         .frame(minHeight: 66)
     }
     
+    @ViewBuilder
     private var contactAvatar: some View {
-        ContactAvatarView(
-            email: conversation.contactEmail,
-            name: conversation.contactName,
-            size: 50
-        )
+        if conversation.isGroupConversation {
+            // Show group icon for group conversations
+            ZStack {
+                Circle()
+                    .fill(Color.gray.opacity(0.2))
+                    .frame(width: 50, height: 50)
+                
+                Image(systemName: "person.2.fill")
+                    .font(.system(size: 22))
+                    .foregroundColor(.gray)
+            }
+        } else {
+            ContactAvatarView(
+                email: conversation.contactEmail,
+                name: conversation.contactName,
+                size: 50
+            )
+        }
     }
     
     private var conversationDetails: some View {
@@ -40,11 +54,19 @@ struct ConversationRowView: View {
     
     private var conversationHeader: some View {
         HStack {
-            Text(conversation.contactName)
-                .font(.headline)
-                .fontWeight(.semibold)
-                .foregroundColor(.primary)
-                .lineLimit(1)
+            HStack(spacing: 4) {
+                Text(conversation.contactName)
+                    .font(.headline)
+                    .fontWeight(.semibold)
+                    .foregroundColor(.primary)
+                    .lineLimit(1)
+                
+                if conversation.isGroupConversation && conversation.participantEmails.count > 0 {
+                    Text("(\(conversation.participantEmails.count))")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+            }
             
             Spacer(minLength: 8)
             

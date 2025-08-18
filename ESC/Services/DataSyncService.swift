@@ -271,6 +271,81 @@ class DataSyncService: ObservableObject {
         syncTimer = nil
     }
     
+    // MARK: - Conversation Management
+    
+    private func createConversationKey(for email: Email, userEmail: String) -> String {
+        // For group conversations, create a key from all participants
+        if email.allRecipients.count > 1 {
+            var participants = Set(email.allRecipients)
+            participants.insert(email.senderEmail.lowercased())
+            participants.remove(userEmail.lowercased())  // Remove self from participants
+            
+            // Sort participants to ensure consistent key regardless of order
+            let sortedParticipants = participants.sorted()
+            return sortedParticipants.joined(separator: ",")
+        } else {
+            // For single recipient, use the contact email as before
+            return email.isFromMe ? email.recipientEmail.lowercased() : email.senderEmail.lowercased()
+        }
+    }
+    
+    private func createConversationName(for email: Email, contactsService: ContactsService, userEmail: String) -> String {
+        // For group conversations, concatenate names
+        if email.allRecipients.count > 1 {
+            var participantNames: [String] = []
+            let userEmailLower = userEmail.lowercased()
+            
+            // Add sender if not from me
+            if !email.isFromMe {
+                let senderName = contactsService.getContactName(for: email.senderEmail) ?? email.sender
+                participantNames.append(senderName)
+            }
+            
+            // Add recipients (excluding self)
+            for recipientEmail in email.allRecipients {
+                // Skip if this is the user's email
+                if recipientEmail.lowercased() == userEmailLower {
+                    continue
+                }
+                
+                if let name = contactsService.getContactName(for: recipientEmail) {
+                    participantNames.append(name)
+                } else {
+                    // Extract name from email or use email itself
+                    let emailParts = recipientEmail.split(separator: "@")
+                    if let localPart = emailParts.first {
+                        participantNames.append(String(localPart).replacingOccurrences(of: ".", with: " ").capitalized)
+                    } else {
+                        participantNames.append(recipientEmail)
+                    }
+                }
+            }
+            
+            // Limit to first 3 names and add "and X more" if needed
+            if participantNames.count > 3 {
+                let firstThree = participantNames.prefix(3).joined(separator: ", ")
+                return "\(firstThree) and \(participantNames.count - 3) more"
+            } else {
+                return participantNames.joined(separator: ", ")
+            }
+        } else {
+            // Single recipient - use existing logic
+            let contactEmail = email.isFromMe ? email.recipientEmail : email.senderEmail
+            var contactName = email.isFromMe ? email.recipient : email.sender
+            
+            if let addressBookName = contactsService.getContactName(for: contactEmail) {
+                contactName = addressBookName
+            } else if contactName == contactEmail {
+                let nameFromEmail = contactEmail.split(separator: "@").first?.replacingOccurrences(of: ".", with: " ").capitalized ?? contactEmail
+                if nameFromEmail != contactEmail {
+                    contactName = nameFromEmail
+                }
+            }
+            
+            return contactName
+        }
+    }
+    
     // MARK: - Smart Sync
     
     func syncData(silent: Bool = false) async {
@@ -358,47 +433,46 @@ class DataSyncService: ObservableObject {
                     }
                 }
                 
-                // Find or create conversation
-                // Normalize email to lowercase for consistent conversation grouping
-                let contactEmail = (email.isFromMe ? email.recipientEmail : email.senderEmail).lowercased()
-                var contactName = email.isFromMe ? email.recipient : email.sender
+                // Get user email for filtering self from participants
+                let userEmail = gmailService.cachedUserEmail ?? ""
                 
-                // Try to get the contact name from the address book
-                print("🔍 DataSyncService: Looking up name for email: \(contactEmail), current name: \(contactName)")
-                if let addressBookName = contactsService.getContactName(for: contactEmail) {
-                    print("✅ DataSyncService: Using address book name: \(addressBookName)")
-                    contactName = addressBookName
-                } else if contactName == contactEmail {
-                    // If the name is just the email, try to extract a better name
-                    let nameFromEmail = contactEmail.split(separator: "@").first?.replacingOccurrences(of: ".", with: " ").capitalized ?? contactEmail
-                    if nameFromEmail != contactEmail {
-                        print("📧 DataSyncService: Using extracted name: \(nameFromEmail)")
-                        contactName = nameFromEmail
-                    } else {
-                        print("⚠️ DataSyncService: No name found, using email: \(contactEmail)")
-                    }
-                } else {
-                    print("📝 DataSyncService: Using Gmail header name: \(contactName)")
+                // Find or create conversation based on participants
+                let conversationKey = createConversationKey(for: email, userEmail: userEmail)
+                let conversationName = createConversationName(for: email, contactsService: contactsService, userEmail: userEmail)
+                let isGroupConversation = email.allRecipients.count > 1
+                
+                print("🔍 DataSyncService: Processing email with \(email.allRecipients.count) recipients")
+                if isGroupConversation {
+                    print("👥 Group conversation key: \(conversationKey)")
+                    print("👥 Group conversation name: \(conversationName)")
                 }
                 
                 let conversation: Conversation
-                if let existing = conversationMap[contactEmail] {
+                if let existing = conversationMap[conversationKey] {
                     conversation = existing
-                    // Update the name if we have a better one from contacts
-                    if let addressBookName = contactsService.getContactName(for: contactEmail),
-                       existing.contactName != addressBookName {
-                        existing.contactName = addressBookName
+                    // Update the name if group participants changed
+                    if isGroupConversation && existing.contactName != conversationName {
+                        existing.contactName = conversationName
                     }
                 } else {
+                    // Create participant list for group conversations
+                    var participantEmails: [String] = []
+                    if isGroupConversation {
+                        participantEmails = email.allRecipients + [email.senderEmail.lowercased()]
+                        participantEmails = Array(Set(participantEmails).subtracting([userEmail.lowercased()]))
+                    }
+                    
                     conversation = Conversation(
-                        contactName: contactName,
-                        contactEmail: contactEmail,  // Store lowercase email
+                        contactName: conversationName,
+                        contactEmail: conversationKey,  // Use conversation key
+                        participantEmails: participantEmails,
+                        isGroupConversation: isGroupConversation,
                         lastMessageTimestamp: email.timestamp,
                         lastMessageSnippet: email.snippet,
                         isRead: email.isRead
                     )
                     modelContext.insert(conversation)
-                    conversationMap[contactEmail] = conversation
+                    conversationMap[conversationKey] = conversation
                 }
                 
                 // Add email to conversation (this will set the bidirectional relationship)

@@ -8,7 +8,10 @@ struct ConversationDetailView: View {
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var contactsService: ContactsService
     @State private var messageText = ""
-    @State private var recipientEmail = ""
+    @State private var recipientEmail = ""  // For single recipient (backward compatibility)
+    @State private var toRecipients: [String] = []
+    @State private var ccRecipients: [String] = []
+    @State private var bccRecipients: [String] = []
     @State private var isSending = false
     @State private var selectedAttachments: [(filename: String, data: Data, mimeType: String)] = []
     @State private var showingError = false
@@ -77,99 +80,27 @@ struct ConversationDetailView: View {
     
     private var recipientSection: some View {
         VStack(spacing: 0) {
-                    HStack(spacing: 12) {
-                        Text("To:")
-                            .font(.body)
-                            .foregroundColor(.primary)
-                            .frame(width: 30, alignment: .leading)
-                        
-                        TextField("Email address", text: $recipientEmail)
-                            .textFieldStyle(PlainTextFieldStyle())
-                            .keyboardType(.emailAddress)
-                            .autocorrectionDisabled()
-                            .textInputAutocapitalization(.never)
-                            .focused($isRecipientFocused)
-                            .onChange(of: recipientEmail) { _, newValue in
-                                isEditingRecipient = true
-                                updateFilteredContacts()
-                            }
-                            .onChange(of: isRecipientFocused) { _, focused in
-                                isEditingRecipient = focused
-                                if focused {
-                                    updateFilteredContacts()
-                                }
-                            }
-                        
-                        Button(action: {
-                            Task {
-                                if contactsService.authorizationStatus != .authorized {
-                                    _ = await contactsService.requestAccess()
-                                }
-                                if contactsService.authorizationStatus == .authorized {
-                                    await contactsService.fetchContacts()
-                                    updateFilteredContacts()
-                                }
-                            }
-                        }) {
-                            Image(systemName: "plus.circle.fill")
-                                .font(.title2)
-                                .foregroundColor(.blue)
-                        }
-                    }
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 12)
-                    
-                    // Contact suggestions dropdown
-                    if isEditingRecipient && !filteredContacts.isEmpty {
-                        VStack(spacing: 0) {
-                            ForEach(filteredContacts.prefix(5), id: \.email) { contact in
-                                Button(action: {
-                                    recipientEmail = contact.email.lowercased()
-                                    conversation.contactEmail = contact.email.lowercased()
-                                    conversation.contactName = contact.name
-                                    isEditingRecipient = false
-                                    isRecipientFocused = false
-                                }) {
-                                    HStack {
-                                        ContactAvatarView(
-                                            email: contact.email,
-                                            name: contact.name,
-                                            size: 32
-                                        )
-                                        
-                                        VStack(alignment: .leading, spacing: 2) {
-                                            Text(contact.name)
-                                                .font(.body)
-                                                .foregroundColor(.primary)
-                                            Text(contact.email)
-                                                .font(.caption)
-                                                .foregroundColor(.secondary)
-                                        }
-                                        
-                                        Spacer()
-                                    }
-                                    .padding(.horizontal, 16)
-                                    .padding(.vertical, 8)
-                                }
-                                .buttonStyle(PlainButtonStyle())
-                                
-                                if contact.email != filteredContacts.prefix(5).last?.email {
-                                    Divider()
-                                        .padding(.leading, 60)
-                                }
-                            }
-                        }
-                        .background(Color.white)
-                        .overlay(
-                            Rectangle()
-                                .stroke(Color.gray.opacity(0.2), lineWidth: 1)
-                        )
-                    }
-                    
+            MultipleRecipientsField(
+                recipients: $toRecipients,
+                ccRecipients: $ccRecipients,
+                bccRecipients: $bccRecipients
+            )
+            
             Divider()
                 .background(Color.gray.opacity(0.3))
         }
         .background(Color.white)
+        .onAppear {
+            // Initialize recipients for existing conversations
+            if !isNewConversation && toRecipients.isEmpty {
+                // For existing conversations, set the contact as the default recipient
+                if conversation.isGroupConversation {
+                    toRecipients = conversation.participantEmails
+                } else if !conversation.contactEmail.isEmpty {
+                    toRecipients = [conversation.contactEmail]
+                }
+            }
+        }
     }
     
     private var messageScrollView: some View {
@@ -184,7 +115,8 @@ struct ConversationDetailView: View {
                                 .foregroundColor(.secondary)
                                 .padding(.bottom, 20)
                         }
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .frame(maxWidth: .infinity)
+                        .frame(minHeight: 200)
                     } else {
                         LazyVStack(spacing: 8) {
                             // Add invisible spacer at top to ensure proper scrolling
@@ -196,6 +128,7 @@ struct ConversationDetailView: View {
                                 MessageBubbleView(
                                     email: email,
                                     allEmails: conversationEmails,
+                                    isGroupConversation: conversation.isGroupConversation,
                                     onForward: { emailToForward in
                                         handleForwardEmail(emailToForward)
                                     },
@@ -341,42 +274,77 @@ struct ConversationDetailView: View {
     }
     
     private func loadEmails() {
-        let contactEmail = conversation.contactEmail
-        // Normalize email for comparison
-        let normalizedContactEmail = contactEmail.lowercased()
-        let descriptor = FetchDescriptor<Email>(
-            predicate: #Predicate<Email> { email in
-                (email.isFromMe && email.recipientEmail == normalizedContactEmail) ||
-                (!email.isFromMe && email.senderEmail == normalizedContactEmail)
-            },
-            sortBy: [SortDescriptor(\.timestamp, order: .forward)]
-        )
-        
-        do {
-            let fetchedEmails = try modelContext.fetch(descriptor)
-            
-            // Remove duplicates based on message content and timestamp
-            var uniqueEmails: [Email] = []
-            var seenMessages = Set<String>()
-            
-            for email in fetchedEmails {
-                // Create a unique key based on content and approximate timestamp
-                let timeKey = Int(email.timestamp.timeIntervalSince1970 / 10) // Round to 10 seconds
-                let uniqueKey = "\(email.isFromMe)_\(timeKey)_\(email.body.prefix(100))"
-                
-                if !seenMessages.contains(uniqueKey) {
-                    seenMessages.insert(uniqueKey)
-                    uniqueEmails.append(email)
-                } else {
-                    print("⚠️ LoadEmails: Skipping duplicate email \(email.id) with key: \(uniqueKey.prefix(50))...")
-                }
+        // For group conversations, we need to match against all participants
+        if conversation.isGroupConversation {
+            // Use the conversation's emails directly if they're already loaded
+            if !conversation.emails.isEmpty {
+                emails = conversation.emails.sorted { $0.timestamp < $1.timestamp }
+                print("📧 LoadEmails: Loaded \(emails.count) emails from group conversation")
+                return
             }
             
-            emails = uniqueEmails
-            print("📧 LoadEmails: Loaded \(uniqueEmails.count) unique emails for \(contactEmail) (filtered from \(fetchedEmails.count) total)")
-        } catch {
-            print("❌ LoadEmails: Failed to fetch emails: \(error)")
-            emails = []
+            // Otherwise fetch emails that match the conversation key
+            let conversationKey = conversation.contactEmail.lowercased()
+            let descriptor = FetchDescriptor<Email>(
+                sortBy: [SortDescriptor(\.timestamp, order: .forward)]
+            )
+            
+            do {
+                let allEmails = try modelContext.fetch(descriptor)
+                // Filter emails that belong to this group conversation
+                let groupEmails = allEmails.filter { email in
+                    // Check if this email's participants match our conversation
+                    let emailParticipants = Set(email.allRecipients + [email.senderEmail.lowercased()])
+                    let conversationParticipants = Set(conversationKey.split(separator: ",").map { String($0) })
+                    
+                    // Check for significant overlap (at least 2 common participants for group)
+                    let commonParticipants = emailParticipants.intersection(conversationParticipants)
+                    return commonParticipants.count >= min(2, conversationParticipants.count)
+                }
+                emails = groupEmails
+                print("👥 LoadEmails: Loaded \(emails.count) emails for group conversation")
+            } catch {
+                print("❌ LoadEmails: Failed to fetch group emails: \(error)")
+                emails = []
+            }
+        } else {
+            // Single recipient conversation - use existing logic
+            let contactEmail = conversation.contactEmail
+            let normalizedContactEmail = contactEmail.lowercased()
+            let descriptor = FetchDescriptor<Email>(
+                predicate: #Predicate<Email> { email in
+                    (email.isFromMe && email.recipientEmail == normalizedContactEmail) ||
+                    (!email.isFromMe && email.senderEmail == normalizedContactEmail)
+                },
+                sortBy: [SortDescriptor(\.timestamp, order: .forward)]
+            )
+            
+            do {
+                let fetchedEmails = try modelContext.fetch(descriptor)
+                
+                // Remove duplicates based on message content and timestamp
+                var uniqueEmails: [Email] = []
+                var seenMessages = Set<String>()
+                
+                for email in fetchedEmails {
+                    // Create a unique key based on content and approximate timestamp
+                    let timeKey = Int(email.timestamp.timeIntervalSince1970 / 10) // Round to 10 seconds
+                    let uniqueKey = "\(email.isFromMe)_\(timeKey)_\(email.body.prefix(100))"
+                    
+                    if !seenMessages.contains(uniqueKey) {
+                        seenMessages.insert(uniqueKey)
+                        uniqueEmails.append(email)
+                    } else {
+                        print("⚠️ LoadEmails: Skipping duplicate email \(email.id) with key: \(uniqueKey.prefix(50))...")
+                    }
+                }
+                
+                emails = uniqueEmails
+                print("📧 LoadEmails: Loaded \(uniqueEmails.count) unique emails for \(contactEmail) (filtered from \(fetchedEmails.count) total)")
+            } catch {
+                print("❌ LoadEmails: Failed to fetch emails: \(error)")
+                emails = []
+            }
         }
     }
     
@@ -409,38 +377,107 @@ struct ConversationDetailView: View {
         var targetConversation = conversation
         var shouldNavigateToExisting = false
         
-        // For new conversations, validate recipient
+        // For existing group conversations, ensure recipients are populated
+        if !isNewConversation && conversation.isGroupConversation {
+            // Parse the participant emails from the conversation
+            if toRecipients.isEmpty {
+                toRecipients = conversation.participantEmails
+            }
+        }
+        
+        // For new conversations, validate recipients
         if isNewConversation {
-            guard !recipientEmail.isEmpty && recipientEmail.contains("@") else {
-                errorMessage = "Please enter a valid email address"
+            // Check if we have at least one recipient
+            guard !toRecipients.isEmpty else {
+                errorMessage = "Please add at least one recipient"
                 showingError = true
                 return
             }
             
-            // Check if we already have a conversation with this recipient
-            if let existingConversation = conversations.first(where: { 
-                $0.contactEmail.lowercased() == recipientEmail.lowercased() 
-            }) {
-                // Use existing conversation instead of creating new one
-                print("🔄 Found existing conversation with \(recipientEmail), using it instead")
-                targetConversation = existingConversation
-                shouldNavigateToExisting = true
+            // Validate all recipients
+            for recipient in toRecipients + ccRecipients + bccRecipients {
+                guard EmailValidator.isValid(recipient) else {
+                    errorMessage = "Invalid email address: \(recipient)"
+                    showingError = true
+                    return
+                }
+            }
+            
+            // For group conversations, create a unique key based on all participants
+            let isGroupMessage = toRecipients.count + ccRecipients.count + bccRecipients.count > 1
+            
+            if isGroupMessage {
+                // Group conversation - create a new conversation with all participants
+                // Get user email to exclude from participants
+                let userEmail = gmailService.cachedUserEmail ?? ""
+                let allRecipients = Array(Set(toRecipients + ccRecipients + bccRecipients))
                 
-                // Load emails from existing conversation
-                emails = existingConversation.emails.sorted { $0.timestamp < $1.timestamp }
+                // Filter out user's own email for display
+                let otherParticipants = allRecipients.filter { $0.lowercased() != userEmail.lowercased() }
+                let participantNames = otherParticipants.map { email in
+                    contactsService.getContactName(for: email) ?? extractNameFromEmail(email)
+                }
+                
+                // Create conversation key from participants (excluding self)
+                let conversationKey = otherParticipants.sorted().joined(separator: ",")
+                
+                // Check if we already have this group conversation
+                if let existingConversation = conversations.first(where: {
+                    $0.contactEmail == conversationKey
+                }) {
+                    print("🔄 Found existing group conversation")
+                    targetConversation = existingConversation
+                    shouldNavigateToExisting = true
+                    emails = existingConversation.emails.sorted { $0.timestamp < $1.timestamp }
+                } else {
+                    // New group conversation
+                    conversation.contactEmail = conversationKey
+                    conversation.contactName = participantNames.prefix(3).joined(separator: ", ")
+                    if participantNames.count > 3 {
+                        conversation.contactName += " and \(participantNames.count - 3) more"
+                    }
+                    conversation.participantEmails = otherParticipants  // Store only other participants
+                    conversation.isGroupConversation = true
+                    targetConversation = conversation
+                }
             } else {
-                // New conversation - update with recipient info
-                conversation.contactEmail = recipientEmail.lowercased()
-                conversation.contactName = extractNameFromEmail(recipientEmail)
-                targetConversation = conversation
+                // Single recipient conversation
+                let primaryRecipient = toRecipients.first ?? ""
+                
+                // Check if we already have a conversation with this recipient
+                if let existingConversation = conversations.first(where: { 
+                    !$0.isGroupConversation && $0.contactEmail.lowercased() == primaryRecipient.lowercased() 
+                }) {
+                    print("🔄 Found existing conversation with \(primaryRecipient)")
+                    targetConversation = existingConversation
+                    shouldNavigateToExisting = true
+                    emails = existingConversation.emails.sorted { $0.timestamp < $1.timestamp }
+                } else {
+                    // New single conversation
+                    conversation.contactEmail = primaryRecipient.lowercased()
+                    conversation.contactName = contactsService.getContactName(for: primaryRecipient) ?? extractNameFromEmail(primaryRecipient)
+                    conversation.isGroupConversation = false
+                    targetConversation = conversation
+                }
             }
         }
         
         isSending = true
         let messageBody = messageText.isEmpty ? "(Attachment)" : messageText
-        let recipient = targetConversation.contactEmail.isEmpty ? recipientEmail : targetConversation.contactEmail
         let attachments = selectedAttachments
         let replyToEmail = replyingToEmail
+        
+        // Ensure we have valid recipients
+        var finalToRecipients = toRecipients
+        if finalToRecipients.isEmpty {
+            if targetConversation.isGroupConversation {
+                // For group conversations, use participant emails
+                finalToRecipients = targetConversation.participantEmails
+            } else {
+                // For single conversations, use the contact email
+                finalToRecipients = [targetConversation.contactEmail]
+            }
+        }
         
         // Debug logging for reply tracking
         if let replyTo = replyToEmail {
@@ -471,15 +508,25 @@ struct ConversationDetailView: View {
                     // Send via Gmail API with attachments and reply headers if applicable
                     if let replyTo = replyToEmail {
                         print("📧 Sending reply - Original subject: '\(replyTo.subject ?? "nil")'")
+                        print("👥 Sending to recipients: \(finalToRecipients.joined(separator: ", "))")
                         try await gmailService.sendEmail(
-                            to: recipient,
+                            to: finalToRecipients,
+                            cc: ccRecipients,
+                            bcc: bccRecipients,
                             body: bodyToSend,
                             subject: replyTo.subject,
                             inReplyTo: replyTo.messageId,
                             attachments: attachments
                         )
                     } else {
-                        try await gmailService.sendEmail(to: recipient, body: bodyToSend, attachments: attachments)
+                        print("👥 Sending to recipients: \(finalToRecipients.joined(separator: ", "))")
+                        try await gmailService.sendEmail(
+                            to: finalToRecipients,
+                            cc: ccRecipients,
+                            bcc: bccRecipients,
+                            body: bodyToSend,
+                            attachments: attachments
+                        )
                     }
                 } else {
                     userEmail = "me@example.com" // Fallback for offline mode
@@ -498,7 +545,8 @@ struct ConversationDetailView: View {
                     senderEmail: userEmail,
                     attachments: attachments,
                     inReplyTo: replyToId,
-                    subject: replyToEmail?.subject
+                    subject: replyToEmail?.subject,
+                    recipients: finalToRecipients
                 )
                 
                 print("✅ Created email with ID: \(email.id)")
@@ -600,16 +648,41 @@ struct ConversationDetailView: View {
         senderEmail: String,
         attachments: [(filename: String, data: Data, mimeType: String)],
         inReplyTo: String? = nil,
-        subject: String? = nil
+        subject: String? = nil,
+        recipients: [String]? = nil
     ) -> Email {
+        // Use provided recipients or fall back to toRecipients
+        let actualRecipients = recipients ?? toRecipients
+        
+        // For group conversations, use the first recipient as primary
+        let primaryRecipient: String
+        let primaryRecipientName: String
+        
+        if !actualRecipients.isEmpty {
+            primaryRecipient = actualRecipients.first!
+            primaryRecipientName = contactsService.getContactName(for: primaryRecipient) ?? extractNameFromEmail(primaryRecipient)
+        } else if !conversation.contactEmail.isEmpty && !conversation.contactEmail.contains(",") {
+            // Single conversation with valid email
+            primaryRecipient = conversation.contactEmail
+            primaryRecipientName = conversation.contactName
+        } else {
+            // Fallback for group conversations - use first participant
+            primaryRecipient = conversation.participantEmails.first ?? ""
+            primaryRecipientName = conversation.contactName
+        }
+        
         let email = Email(
             id: UUID().uuidString,
             messageId: UUID().uuidString,
             threadId: UUID().uuidString,
             sender: senderName,
             senderEmail: senderEmail,
-            recipient: conversation.contactName,
-            recipientEmail: conversation.contactEmail,
+            recipient: primaryRecipientName,
+            recipientEmail: primaryRecipient,
+            allRecipients: actualRecipients + ccRecipients + bccRecipients,
+            toRecipients: actualRecipients,
+            ccRecipients: ccRecipients,
+            bccRecipients: bccRecipients,
             body: body,
             snippet: MessageCleaner.createCleanSnippet(body),
             timestamp: Date(),

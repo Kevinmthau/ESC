@@ -108,6 +108,10 @@ class ContactsService: ObservableObject {
         }
     }
     
+    func getAllContacts() -> [(name: String, email: String)] {
+        return contacts
+    }
+    
     func getContactPhoto(for email: String) -> UIImage? {
         let normalizedEmail = email.lowercased()
         

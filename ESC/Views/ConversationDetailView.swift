@@ -195,6 +195,7 @@ struct ConversationDetailView: View {
                             ForEach(conversationEmails, id: \.id) { email in
                                 MessageBubbleView(
                                     email: email,
+                                    allEmails: conversationEmails,
                                     onForward: { emailToForward in
                                         handleForwardEmail(emailToForward)
                                     },
@@ -396,7 +397,13 @@ struct ConversationDetailView: View {
     }
     
     private func sendMessage() {
-        guard !messageText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !selectedAttachments.isEmpty else { return }
+        guard !messageText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !selectedAttachments.isEmpty else {
+            print("⚠️ Prevented sending empty message")
+            return
+        }
+        
+        print("📤 sendMessage called with text: '\(messageText)'")
+        print("   Is reply: \(replyingToEmail != nil)")
         
         // Store the conversation we'll actually send to
         var targetConversation = conversation
@@ -435,6 +442,16 @@ struct ConversationDetailView: View {
         let attachments = selectedAttachments
         let replyToEmail = replyingToEmail
         
+        // Debug logging for reply tracking
+        if let replyTo = replyToEmail {
+            print("🔗 Creating reply to message:")
+            print("   Reply to ID: \(replyTo.id)")
+            print("   Reply to messageId: \(replyTo.messageId)")
+            print("   Reply to snippet: \(replyTo.snippet)")
+        } else {
+            print("📨 Creating new message (not a reply)")
+        }
+        
         Task {
             do {
                 // Get user's email and name for proper sender info
@@ -471,14 +488,22 @@ struct ConversationDetailView: View {
                 
                 // Create local email record with proper sender info and attachments
                 // IMPORTANT: Use original messageBody (without history) for local storage
+                // For replies, use the id field which works for both local and Gmail messages
+                let replyToId = replyToEmail?.id
+                print("🔨 Creating local email with inReplyTo: \(replyToId ?? "nil")")
+                
                 let email = createLocalEmail(
                     body: messageBody,
                     senderName: userName,
                     senderEmail: userEmail,
                     attachments: attachments,
-                    inReplyTo: replyToEmail?.messageId,
+                    inReplyTo: replyToId,
                     subject: replyToEmail?.subject
                 )
+                
+                print("✅ Created email with ID: \(email.id)")
+                print("   inReplyToMessageId: \(email.inReplyToMessageId ?? "nil")")
+                print("   snippet: \(email.snippet)")
                 
                 await MainActor.run {
                     // Clear message text and attachments immediately for better UX
@@ -615,7 +640,10 @@ struct ConversationDetailView: View {
     }
     
     private func handleReplyToEmail(_ email: Email) {
-        print("📬 Reply to email - Subject: '\(email.subject ?? "nil")', MessageId: \(email.messageId)")
+        print("📬 handleReplyToEmail called")
+        print("   Email ID: \(email.id)")
+        print("   Subject: '\(email.subject ?? "nil")'")
+        print("   MessageId: \(email.messageId)")
         
         // If the email doesn't have a subject, try to fetch it
         if email.subject == nil || email.subject?.isEmpty == true {
@@ -664,38 +692,42 @@ struct ConversationDetailView: View {
     
     @ViewBuilder
     private func replyPreviewView(for email: Email) -> some View {
-        HStack(spacing: 8) {
-            Rectangle()
-                .fill(Color.blue)
-                .frame(width: 3)
-            
-            VStack(alignment: .leading, spacing: 4) {
-                HStack {
-                    Text("Replying to \(email.isFromMe ? "yourself" : email.sender)")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                    
-                    Spacer()
-                    
-                    Button(action: {
-                        replyingToEmail = nil
-                    }) {
-                        Image(systemName: "xmark.circle.fill")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                    }
-                }
+        VStack(spacing: 8) {
+            HStack {
+                Spacer()
                 
-                Text(MessageCleaner.createCleanSnippet(email.body))
-                    .font(.caption)
-                    .foregroundColor(.primary)
-                    .lineLimit(2)
-                    .truncationMode(.tail)
+                // Dismiss button
+                Button(action: {
+                    // Clear reply state and any typed message
+                    replyingToEmail = nil
+                    messageText = ""
+                    selectedAttachments = []
+                    isTextFieldFocused = false
+                }) {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 18))
+                        .foregroundColor(.secondary)
+                }
             }
-            .padding(.vertical, 8)
-            .padding(.trailing, 8)
+            .padding(.horizontal, 16)
+            
+            // Dimmed bubble showing the message being replied to
+            HStack {
+                Spacer(minLength: 60)
+                
+                Text(email.snippet.isEmpty ? MessageCleaner.createCleanSnippet(email.body) : email.snippet)
+                    .font(.system(size: 15))
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                    .background(Color(.systemGray5))
+                    .foregroundColor(.secondary)
+                    .clipShape(RoundedRectangle(cornerRadius: 18))
+                    .lineLimit(2)
+                    .opacity(0.8)
+            }
+            .padding(.horizontal, 16)
         }
-        .padding(.leading, 16)
+        .padding(.vertical, 8)
         .background(Color(.systemBackground))
         .transition(.move(edge: .bottom).combined(with: .opacity))
     }

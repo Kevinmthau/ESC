@@ -306,13 +306,13 @@ class DataSyncService: ObservableObject {
             
             // Get existing email IDs to avoid duplicates
             let existingEmails = try modelContext.fetch(FetchDescriptor<Email>())
-            let existingEmailIds = Set(existingEmails.map { $0.messageId })
+            let existingEmailIds = Set(existingEmails.map { $0.id })
             var newMessageCount = 0
             
             // Process fetched emails
             for email in fetchedEmails {
-                // Skip if we already have this email
-                if existingEmailIds.contains(email.messageId) {
+                // Skip if we already have this email (check by Gmail ID)
+                if existingEmailIds.contains(email.id) {
                     continue
                 }
                 
@@ -325,7 +325,7 @@ class DataSyncService: ObservableObject {
                         existingEmail.isFromMe &&
                         existingEmail.recipientEmail == email.recipientEmail &&
                         existingEmail.timestamp > recentCutoff &&
-                        existingEmail.messageId != email.messageId
+                        existingEmail.id != email.id
                     }
                     
                     // Check if any match by content (comparing cleaned versions)
@@ -342,7 +342,7 @@ class DataSyncService: ObservableObject {
                         if let localCopy = matchingLocalEmails.first(where: { 
                             $0.body.trimmingCharacters(in: .whitespacesAndNewlines) == cleanedNewBody 
                         }) {
-                            print("🔄 DataSyncService: Replacing local copy \(localCopy.id) with synced message \(email.messageId)")
+                            print("🔄 DataSyncService: Replacing local copy \(localCopy.id) with synced message \(email.id)")
                             
                             // Remove the local copy from the conversation
                             if let conversation = localCopy.conversation {

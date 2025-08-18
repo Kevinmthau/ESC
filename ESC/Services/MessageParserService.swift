@@ -10,6 +10,7 @@ struct MessageParserService {
         var recipientEmail = ""
         var subject: String?
         var inReplyToMessageId: String?
+        var rfc2822MessageId: String?
         
         // Extract headers
         for header in payload.headers ?? [] {
@@ -20,6 +21,9 @@ struct MessageParserService {
                 (recipient, recipientEmail) = EmailValidator.parseEmailAddress(header.value)
             case "subject":
                 subject = header.value
+            case "message-id":
+                // Store the RFC2822 Message-ID (with angle brackets removed)
+                rfc2822MessageId = header.value.trimmingCharacters(in: CharacterSet(charactersIn: "<>"))
             case "in-reply-to":
                 // Extract message ID from angle brackets if present
                 let value = header.value
@@ -35,9 +39,19 @@ struct MessageParserService {
         
         let timestamp = Date(timeIntervalSince1970: (TimeInterval(message.internalDate ?? "0") ?? 0) / 1000)
         
+        // For messageId, use the RFC2822 Message-ID if available, otherwise fall back to Gmail ID
+        // This allows us to match In-Reply-To headers correctly
+        let messageIdentifier = rfc2822MessageId ?? message.id
+        
+        // Debug logging for reply tracking
+        if let replyTo = inReplyToMessageId {
+            print("🔗 Reply detected - Message \(message.id) replies to \(replyTo)")
+            print("   RFC2822 Message-ID: \(rfc2822MessageId ?? "none")")
+        }
+        
         let email = Email(
             id: message.id,
-            messageId: message.id,
+            messageId: messageIdentifier,
             threadId: message.threadId,
             sender: sender,
             senderEmail: senderEmail,

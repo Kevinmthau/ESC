@@ -16,6 +16,7 @@ struct ConversationListView: View {
     @State private var refreshTrigger = 0
     @State private var pendingNavigation: Conversation?
     @State private var isInitialLoad = false
+    @State private var hasCompletedInitialSync = false
     
     private var conversations: [Conversation] {
         // Only show conversations that have messages
@@ -54,8 +55,8 @@ struct ConversationListView: View {
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .background(Color.white)
-                } else if (syncService?.isSyncing == true || isInitialLoad) && conversations.isEmpty {
-                    // Show loading state when syncing or initial load
+                } else if isInitialLoad && !hasCompletedInitialSync && conversations.isEmpty {
+                    // Show loading state only during first sync after login
                     VStack(spacing: 20) {
                         ProgressView()
                             .scaleEffect(1.5)
@@ -148,8 +149,25 @@ struct ConversationListView: View {
                     
                     // Then start syncing with Gmail
                     if gmailService.isAuthenticated {
-                        await MainActor.run {
-                            syncService?.startAutoSync()
+                        // If authenticated but haven't synced yet, show loading state briefly
+                        if !hasCompletedInitialSync && conversations.isEmpty {
+                            await MainActor.run {
+                                isInitialLoad = true
+                            }
+                            
+                            // Do initial sync
+                            await syncService?.syncData()
+                            
+                            await MainActor.run {
+                                hasCompletedInitialSync = true
+                                isInitialLoad = false
+                                syncService?.startAutoSync()
+                            }
+                        } else {
+                            // Already synced before, just start auto-sync
+                            await MainActor.run {
+                                syncService?.startAutoSync()
+                            }
                         }
                     }
                 }
@@ -204,8 +222,9 @@ struct ConversationListView: View {
                         await syncService?.syncData()
                         syncService?.startAutoSync()
                         
-                        // Clear initial load state after sync completes
+                        // Mark initial sync as completed and clear loading state
                         await MainActor.run {
+                            hasCompletedInitialSync = true
                             isInitialLoad = false
                         }
                     }

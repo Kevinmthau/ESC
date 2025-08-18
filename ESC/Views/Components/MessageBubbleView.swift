@@ -3,10 +3,39 @@ import QuickLook
 
 struct MessageBubbleView: View {
     let email: Email
+    var allEmails: [Email] = []
     @State private var htmlContentHeight: CGFloat = 100
     @State private var showingEmailReader = false
     var onForward: ((Email) -> Void)?
     var onReply: ((Email) -> Void)?
+    
+    private var originalEmail: Email? {
+        guard let replyToId = email.inReplyToMessageId else { 
+            return nil 
+        }
+        
+        // Debug logging
+        print("🔍 Message \(email.id) is looking for reply-to ID: \(replyToId)")
+        print("   This message snippet: \(email.snippet.prefix(30))...")
+        print("   Available messages in conversation (\(allEmails.count) total):")
+        for e in allEmails {
+            print("     - ID: \(e.id), messageId: \(e.messageId)")
+            print("       Snippet: \(e.snippet.prefix(30))...")
+        }
+        
+        // Try to find by messageId first (for RFC2822 IDs), then by Gmail ID (for local messages)
+        let original = allEmails.first { $0.messageId == replyToId } ?? 
+                      allEmails.first { $0.id == replyToId }
+        
+        if let original = original {
+            print("✅ Found original message!")
+            print("   Original snippet: \(original.snippet)")
+        } else {
+            print("⚠️ Could not find original message with ID: \(replyToId)")
+            print("   Searched for messageId=\(replyToId) OR id=\(replyToId)")
+        }
+        return original
+    }
     
     var body: some View {
         HStack {
@@ -38,6 +67,11 @@ struct MessageBubbleView: View {
     
     private var sentMessageBubble: some View {
         VStack(alignment: .trailing, spacing: 2) {
+            // Show reply indicator above the message bubble if this is a reply
+            if let original = originalEmail {
+                ReplyIndicatorView(originalEmail: original, isFromMe: true)
+            }
+            
             VStack(alignment: .trailing, spacing: 8) {
                 // For forwarded messages, show attachments separately below
                 let isForwarded = isForwardedMessage()
@@ -133,6 +167,11 @@ struct MessageBubbleView: View {
     
     private var receivedMessageBubble: some View {
         VStack(alignment: .leading, spacing: 2) {
+            // Show reply indicator above the message bubble if this is a reply
+            if let original = originalEmail {
+                ReplyIndicatorView(originalEmail: original, isFromMe: false)
+            }
+            
             VStack(alignment: .leading, spacing: 8) {
                 // For forwarded messages, show attachments separately below
                 let isForwarded = isForwardedMessage()
@@ -704,33 +743,52 @@ struct ShareSheet: UIViewControllerRepresentable {
 
 #Preview {
     VStack(spacing: 8) {
-        MessageBubbleView(email: Email(
-            id: "1",
-            messageId: "1",
-            sender: "John",
-            senderEmail: "john@example.com",
-            recipient: "Me",
-            recipientEmail: "me@example.com",
-            body: "Hello there!",
-            snippet: "Hello there!",
-            timestamp: Date(),
-            isFromMe: false,
-            conversation: nil
-        ))
+        MessageBubbleView(
+            email: Email(
+                id: "1",
+                messageId: "1",
+                sender: "John",
+                senderEmail: "john@example.com",
+                recipient: "Me",
+                recipientEmail: "me@example.com",
+                body: "Hello there!",
+                snippet: "Hello there!",
+                timestamp: Date(),
+                isFromMe: false,
+                conversation: nil
+            ),
+            allEmails: []
+        )
         
-        MessageBubbleView(email: Email(
-            id: "2",
-            messageId: "2",
-            sender: "Me",
-            senderEmail: "me@example.com",
-            recipient: "John",
-            recipientEmail: "john@example.com",
-            body: "Hi! How are you?",
-            snippet: "Hi! How are you?",
-            timestamp: Date(),
-            isFromMe: true,
-            conversation: nil
-        ))
+        MessageBubbleView(
+            email: Email(
+                id: "2",
+                messageId: "2",
+                sender: "Me",
+                senderEmail: "me@example.com",
+                recipient: "John",
+                recipientEmail: "john@example.com",
+                body: "Hi! How are you?",
+                snippet: "Hi! How are you?",
+                timestamp: Date(),
+                isFromMe: true,
+                conversation: nil,
+                inReplyToMessageId: "1"
+            ),
+            allEmails: [Email(
+                id: "1",
+                messageId: "1",
+                sender: "John",
+                senderEmail: "john@example.com",
+                recipient: "Me",
+                recipientEmail: "me@example.com",
+                body: "Hello there!",
+                snippet: "Hello there!",
+                timestamp: Date(),
+                isFromMe: false,
+                conversation: nil
+            )]
+        )
     }
     .padding()
 }

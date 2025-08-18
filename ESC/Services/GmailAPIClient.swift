@@ -84,6 +84,28 @@ actor GmailAPIClient {
         return try await performRequest(request, responseType: GmailProfile.self)
     }
     
+    func getUserName() async throws -> String? {
+        // Try to get the user's name from Google OAuth2 userinfo endpoint
+        guard let url = URL(string: "https://www.googleapis.com/oauth2/v2/userinfo") else {
+            throw GmailError.invalidURL
+        }
+        
+        let request = try await createAuthenticatedRequest(url: url)
+        
+        do {
+            let response = try await performRequest(request, responseType: GoogleUserInfo.self)
+            // Return the name if available, otherwise return nil
+            if let name = response.name, !name.isEmpty {
+                return name
+            }
+            return nil
+        } catch {
+            print("⚠️ Failed to get user name from Google: \(error)")
+            // Silently fail - userinfo is optional
+            return nil
+        }
+    }
+    
     // MARK: - Private Helper Methods
     
     private func createAuthenticatedRequest(url: URL) async throws -> URLRequest {

@@ -104,16 +104,32 @@ struct EmailMessageBuilder {
     }
     
     func validate() throws {
-        guard EmailValidator.isValid(from) else {
+        // Extract email from "Name <email@example.com>" format if present
+        let fromEmail = extractEmailAddress(from: from)
+        let toEmail = extractEmailAddress(from: to)
+        
+        guard EmailValidator.isValid(fromEmail) else {
             throw GmailError.invalidMessageFormat
         }
         
-        guard EmailValidator.isValid(to) else {
+        guard EmailValidator.isValid(toEmail) else {
             throw GmailError.invalidRecipient
         }
         
         guard !body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             throw GmailError.invalidMessageFormat
         }
+    }
+    
+    private func extractEmailAddress(from field: String) -> String {
+        // Handle "Name <email@example.com>" format
+        if let startIndex = field.firstIndex(of: "<"),
+           let endIndex = field.firstIndex(of: ">"),
+           startIndex < endIndex {
+            let email = String(field[field.index(after: startIndex)..<endIndex])
+            return email.trimmingCharacters(in: .whitespaces)
+        }
+        // Return as-is if not in angle bracket format
+        return field
     }
 }

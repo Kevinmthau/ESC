@@ -51,15 +51,24 @@ struct MessageBubbleView: View {
                         if let htmlBody = email.htmlBody, !htmlBody.isEmpty {
                             // Check if this is a reply or marketing email
                             if isLikelyReplyEmail() {
-                                // For replies, just show the text without the button
-                                Text(createPreviewText(from: email.body))
-                                    .lineLimit(nil)
-                                    .multilineTextAlignment(.leading)
-                                    .padding(.horizontal, 16)
-                                    .padding(.vertical, 10)
-                                    .background(Color.blue)
-                                    .foregroundColor(.white)
-                                    .clipShape(RoundedRectangle(cornerRadius: 18))
+                                // For replies, show the text with link detection
+                                let previewText = createPreviewText(from: email.body)
+                                if LinkDetector.containsLink(previewText) {
+                                    LinkedTextView(text: previewText, isFromMe: true)
+                                        .padding(.horizontal, 16)
+                                        .padding(.vertical, 10)
+                                        .background(Color.blue)
+                                        .clipShape(RoundedRectangle(cornerRadius: 18))
+                                } else {
+                                    Text(previewText)
+                                        .lineLimit(nil)
+                                        .multilineTextAlignment(.leading)
+                                        .padding(.horizontal, 16)
+                                        .padding(.vertical, 10)
+                                        .background(Color.blue)
+                                        .foregroundColor(.white)
+                                        .clipShape(RoundedRectangle(cornerRadius: 18))
+                                }
                             } else {
                                 // For marketing/newsletter emails, show preview with tap to expand
                                 Button(action: {
@@ -90,13 +99,22 @@ struct MessageBubbleView: View {
                                 .buttonStyle(PlainButtonStyle())
                             }
                         } else {
-                            // Render plain text
-                            Text(MessageCleaner.cleanMessageBody(email.body))
-                                .padding(.horizontal, 16)
-                                .padding(.vertical, 10)
-                                .background(Color.blue)
-                                .foregroundColor(.white)
-                                .clipShape(RoundedRectangle(cornerRadius: 18))
+                            // Render plain text with link detection
+                            let cleanedBody = MessageCleaner.cleanMessageBody(email.body)
+                            if LinkDetector.containsLink(cleanedBody) {
+                                LinkedTextView(text: cleanedBody, isFromMe: true)
+                                    .padding(.horizontal, 16)
+                                    .padding(.vertical, 10)
+                                    .background(Color.blue)
+                                    .clipShape(RoundedRectangle(cornerRadius: 18))
+                            } else {
+                                Text(cleanedBody)
+                                    .padding(.horizontal, 16)
+                                    .padding(.vertical, 10)
+                                    .background(Color.blue)
+                                    .foregroundColor(.white)
+                                    .clipShape(RoundedRectangle(cornerRadius: 18))
+                            }
                         }
                     }
                 }
@@ -128,15 +146,24 @@ struct MessageBubbleView: View {
                         if let htmlBody = email.htmlBody, !htmlBody.isEmpty {
                             // Check if this is a reply or marketing email
                             if isLikelyReplyEmail() {
-                                // For replies, just show the text without the button
-                                Text(createPreviewText(from: email.body))
-                                    .lineLimit(nil)
-                                    .multilineTextAlignment(.leading)
-                                    .padding(.horizontal, 16)
-                                    .padding(.vertical, 10)
-                                    .background(Color(.systemGray5))
-                                    .foregroundColor(.primary)
-                                    .clipShape(RoundedRectangle(cornerRadius: 18))
+                                // For replies, show the text with link detection
+                                let previewText = createPreviewText(from: email.body)
+                                if LinkDetector.containsLink(previewText) {
+                                    LinkedTextView(text: previewText, isFromMe: false)
+                                        .padding(.horizontal, 16)
+                                        .padding(.vertical, 10)
+                                        .background(Color(.systemGray5))
+                                        .clipShape(RoundedRectangle(cornerRadius: 18))
+                                } else {
+                                    Text(previewText)
+                                        .lineLimit(nil)
+                                        .multilineTextAlignment(.leading)
+                                        .padding(.horizontal, 16)
+                                        .padding(.vertical, 10)
+                                        .background(Color(.systemGray5))
+                                        .foregroundColor(.primary)
+                                        .clipShape(RoundedRectangle(cornerRadius: 18))
+                                }
                             } else {
                                 // For marketing/newsletter emails, show preview with tap to expand
                                 Button(action: {
@@ -167,13 +194,22 @@ struct MessageBubbleView: View {
                                 .buttonStyle(PlainButtonStyle())
                             }
                         } else {
-                            // Render plain text
-                            Text(MessageCleaner.cleanMessageBody(email.body))
-                                .padding(.horizontal, 16)
-                                .padding(.vertical, 10)
-                                .background(Color(.systemGray5))
-                                .foregroundColor(.primary)
-                                .clipShape(RoundedRectangle(cornerRadius: 18))
+                            // Render plain text with link detection
+                            let cleanedBody = MessageCleaner.cleanMessageBody(email.body)
+                            if LinkDetector.containsLink(cleanedBody) {
+                                LinkedTextView(text: cleanedBody, isFromMe: false)
+                                    .padding(.horizontal, 16)
+                                    .padding(.vertical, 10)
+                                    .background(Color(.systemGray5))
+                                    .clipShape(RoundedRectangle(cornerRadius: 18))
+                            } else {
+                                Text(cleanedBody)
+                                    .padding(.horizontal, 16)
+                                    .padding(.vertical, 10)
+                                    .background(Color(.systemGray5))
+                                    .foregroundColor(.primary)
+                                    .clipShape(RoundedRectangle(cornerRadius: 18))
+                            }
                         }
                     }
                 }

@@ -61,3 +61,25 @@ struct AttachmentResponse: Codable {
     let size: Int
     let data: String?
 }
+
+// Google People API models for getting user's name
+struct GooglePersonResponse: Codable {
+    let names: [GooglePersonName]?
+}
+
+struct GooglePersonName: Codable {
+    let displayName: String?
+    let givenName: String?
+    let familyName: String?
+}
+
+// Google OAuth2 UserInfo API model
+struct GoogleUserInfo: Codable {
+    let id: String?
+    let email: String?
+    let name: String?
+    let given_name: String?
+    let family_name: String?
+    let picture: String?
+    let verified_email: Bool?
+}

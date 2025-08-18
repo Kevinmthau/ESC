@@ -402,11 +402,12 @@ struct ComposeView: View {
     }
     
     private func findOrCreateConversation(for email: String, email emailObject: Email) -> Conversation {
-        print("🔍 ComposeView: Looking for conversation with email: \(email)")
+        let normalizedEmail = email.lowercased()
+        print("🔍 ComposeView: Looking for conversation with email: \(normalizedEmail)")
         
         // Try to find existing conversation
         let descriptor = FetchDescriptor<Conversation>(
-            predicate: #Predicate { $0.contactEmail == email }
+            predicate: #Predicate { $0.contactEmail == normalizedEmail }
         )
         
         if let existingConversation = try? modelContext.fetch(descriptor).first {
@@ -420,7 +421,7 @@ struct ComposeView: View {
         // Create new conversation
         let conversation = Conversation(
             contactName: extractNameFromEmail(email),
-            contactEmail: email,
+            contactEmail: normalizedEmail,
             lastMessageTimestamp: Date(),
             lastMessageSnippet: emailObject.snippet,
             isRead: true

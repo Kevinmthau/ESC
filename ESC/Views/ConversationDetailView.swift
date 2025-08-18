@@ -124,8 +124,8 @@ struct ConversationDetailView: View {
                         VStack(spacing: 0) {
                             ForEach(filteredContacts.prefix(5), id: \.email) { contact in
                                 Button(action: {
-                                    recipientEmail = contact.email
-                                    conversation.contactEmail = contact.email
+                                    recipientEmail = contact.email.lowercased()
+                                    conversation.contactEmail = contact.email.lowercased()
                                     conversation.contactName = contact.name
                                     isEditingRecipient = false
                                     isRecipientFocused = false
@@ -341,10 +341,12 @@ struct ConversationDetailView: View {
     
     private func loadEmails() {
         let contactEmail = conversation.contactEmail
+        // Normalize email for comparison
+        let normalizedContactEmail = contactEmail.lowercased()
         let descriptor = FetchDescriptor<Email>(
             predicate: #Predicate<Email> { email in
-                (email.isFromMe && email.recipientEmail == contactEmail) ||
-                (!email.isFromMe && email.senderEmail == contactEmail)
+                (email.isFromMe && email.recipientEmail == normalizedContactEmail) ||
+                (!email.isFromMe && email.senderEmail == normalizedContactEmail)
             },
             sortBy: [SortDescriptor(\.timestamp, order: .forward)]
         )
@@ -396,6 +398,10 @@ struct ConversationDetailView: View {
     private func sendMessage() {
         guard !messageText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !selectedAttachments.isEmpty else { return }
         
+        // Store the conversation we'll actually send to
+        var targetConversation = conversation
+        var shouldNavigateToExisting = false
+        
         // For new conversations, validate recipient
         if isNewConversation {
             guard !recipientEmail.isEmpty && recipientEmail.contains("@") else {
@@ -404,23 +410,39 @@ struct ConversationDetailView: View {
                 return
             }
             
-            // Update conversation with recipient info
-            conversation.contactEmail = recipientEmail
-            conversation.contactName = extractNameFromEmail(recipientEmail)
+            // Check if we already have a conversation with this recipient
+            if let existingConversation = conversations.first(where: { 
+                $0.contactEmail.lowercased() == recipientEmail.lowercased() 
+            }) {
+                // Use existing conversation instead of creating new one
+                print("🔄 Found existing conversation with \(recipientEmail), using it instead")
+                targetConversation = existingConversation
+                shouldNavigateToExisting = true
+                
+                // Load emails from existing conversation
+                emails = existingConversation.emails.sorted { $0.timestamp < $1.timestamp }
+            } else {
+                // New conversation - update with recipient info
+                conversation.contactEmail = recipientEmail.lowercased()
+                conversation.contactName = extractNameFromEmail(recipientEmail)
+                targetConversation = conversation
+            }
         }
         
         isSending = true
         let messageBody = messageText.isEmpty ? "(Attachment)" : messageText
-        let recipient = isNewConversation ? recipientEmail : conversation.contactEmail
+        let recipient = targetConversation.contactEmail.isEmpty ? recipientEmail : targetConversation.contactEmail
         let attachments = selectedAttachments
         let replyToEmail = replyingToEmail
         
         Task {
             do {
-                // Get user's email first for proper sender info
+                // Get user's email and name for proper sender info
                 let userEmail: String
+                let userName: String
                 if gmailService.isAuthenticated {
                     userEmail = try await gmailService.getUserEmail()
+                    userName = try await gmailService.getUserDisplayName()
                     
                     // Build message body with history for replies
                     let bodyToSend = if let replyTo = replyToEmail {
@@ -444,12 +466,14 @@ struct ConversationDetailView: View {
                     }
                 } else {
                     userEmail = "me@example.com" // Fallback for offline mode
+                    userName = "Me"
                 }
                 
                 // Create local email record with proper sender info and attachments
                 // IMPORTANT: Use original messageBody (without history) for local storage
                 let email = createLocalEmail(
                     body: messageBody,
+                    senderName: userName,
                     senderEmail: userEmail,
                     attachments: attachments,
                     inReplyTo: replyToEmail?.messageId,
@@ -471,21 +495,21 @@ struct ConversationDetailView: View {
                         modelContext.insert(attachment)
                     }
                     
-                    // Add email to conversation and update conversation metadata
-                    conversation.addEmail(email)
-                    conversation.isRead = true
+                    // Add email to the target conversation and update metadata
+                    targetConversation.addEmail(email)
+                    targetConversation.isRead = true
                     
                     // Force timestamp update to ensure list reordering
-                    conversation.lastMessageTimestamp = email.timestamp
-                    conversation.lastMessageSnippet = email.snippet
+                    targetConversation.lastMessageTimestamp = email.timestamp
+                    targetConversation.lastMessageSnippet = email.snippet
                     
                     // For new conversations, ensure the conversation is saved
-                    if conversation.modelContext == nil {
-                        modelContext.insert(conversation)
+                    if targetConversation.modelContext == nil {
+                        modelContext.insert(targetConversation)
                     }
                     
-                    print("✅ Added email to conversation, final timestamp: \(conversation.lastMessageTimestamp)")
-                    print("📝 Final conversation snippet: \(conversation.lastMessageSnippet)")
+                    print("✅ Added email to conversation, final timestamp: \(targetConversation.lastMessageTimestamp)")
+                    print("📝 Final conversation snippet: \(targetConversation.lastMessageSnippet)")
                     
                     do {
                         // Process any pending changes first
@@ -511,14 +535,26 @@ struct ConversationDetailView: View {
                         // Notify about the conversation update
                         NotificationCenter.default.post(
                             name: NSNotification.Name("ConversationUpdated"),
-                            object: conversation
+                            object: targetConversation
                         )
                         
                         // Notify sync service about the sent message
                         NotificationCenter.default.post(
                             name: NSNotification.Name("MessageSent"),
-                            object: conversation
+                            object: targetConversation
                         )
+                        
+                        // If we found an existing conversation, navigate to it
+                        if shouldNavigateToExisting && targetConversation !== conversation {
+                            // Dismiss this view and navigate to the existing conversation
+                            dismiss()
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                                NotificationCenter.default.post(
+                                    name: NSNotification.Name("NavigateToConversation"),
+                                    object: targetConversation
+                                )
+                            }
+                        }
                     } catch {
                         print("❌ Failed to save sent message: \(error)")
                         handleError(error)
@@ -535,6 +571,7 @@ struct ConversationDetailView: View {
     
     private func createLocalEmail(
         body: String,
+        senderName: String,
         senderEmail: String,
         attachments: [(filename: String, data: Data, mimeType: String)],
         inReplyTo: String? = nil,
@@ -544,7 +581,7 @@ struct ConversationDetailView: View {
             id: UUID().uuidString,
             messageId: UUID().uuidString,
             threadId: UUID().uuidString,
-            sender: "Me",
+            sender: senderName,
             senderEmail: senderEmail,
             recipient: conversation.contactName,
             recipientEmail: conversation.contactEmail,

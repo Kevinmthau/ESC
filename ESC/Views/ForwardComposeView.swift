@@ -207,6 +207,10 @@ struct ForwardComposeView: View {
                     }
                 }
                 
+                // Get user info for proper sender details
+                let userEmail = try await gmailService.getUserEmail()
+                let userName = try await gmailService.getUserDisplayName()
+                
                 // Send the email with attachments
                 try await gmailService.sendEmail(
                     to: recipientEmail,
@@ -215,9 +219,10 @@ struct ForwardComposeView: View {
                 )
                 
                 // Find or create conversation
+                let normalizedRecipientEmail = recipientEmail.lowercased()
                 let descriptor = FetchDescriptor<Conversation>(
                     predicate: #Predicate<Conversation> { conv in
-                        conv.contactEmail == recipientEmail
+                        conv.contactEmail == normalizedRecipientEmail
                     }
                 )
                 
@@ -232,7 +237,7 @@ struct ForwardComposeView: View {
                     
                     conversation = Conversation(
                         contactName: contactName,
-                        contactEmail: recipientEmail,
+                        contactEmail: normalizedRecipientEmail,
                         lastMessageTimestamp: Date(),
                         lastMessageSnippet: messageText.prefix(100).trimmingCharacters(in: .whitespacesAndNewlines),
                         isRead: true
@@ -244,8 +249,8 @@ struct ForwardComposeView: View {
                 let sentEmail = Email(
                     id: UUID().uuidString,
                     messageId: "local-\(UUID().uuidString)",
-                    sender: "Me",
-                    senderEmail: "",
+                    sender: userName,
+                    senderEmail: userEmail,
                     recipient: conversation.contactName,
                     recipientEmail: recipientEmail,
                     body: messageText,

@@ -3,7 +3,7 @@ import Foundation
 struct Constants {
     struct Gmail {
         static let baseURL = "https://gmail.googleapis.com/gmail/v1"
-        static let scopes = "https://www.googleapis.com/auth/gmail.modify https://www.googleapis.com/auth/gmail.send"
+        static let scopes = "https://www.googleapis.com/auth/gmail.modify https://www.googleapis.com/auth/gmail.send https://www.googleapis.com/auth/userinfo.profile"
         static let clientId = "999923476073-b4m4r3o96gv30rqmo71qo210oa46au74.apps.googleusercontent.com"
         static let redirectUri = "com.googleusercontent.apps.999923476073-b4m4r3o96gv30rqmo71qo210oa46au74:/oauth"
     }

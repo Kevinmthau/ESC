@@ -43,9 +43,9 @@ final class Email: @unchecked Sendable {
         self.messageId = messageId
         self.threadId = threadId
         self.sender = sender
-        self.senderEmail = senderEmail
+        self.senderEmail = senderEmail.lowercased()
         self.recipient = recipient
-        self.recipientEmail = recipientEmail
+        self.recipientEmail = recipientEmail.lowercased()
         self.body = body
         self.htmlBody = htmlBody
         self.snippet = snippet

@@ -20,6 +20,13 @@ class DataSyncService: ObservableObject {
         self.gmailService = gmailService
         self.contactsService = contactsService
         
+        // Migrate duplicate conversations, fix sender names, and update previews on init
+        Task { @MainActor in
+            await self.mergeDuplicateConversations()
+            await self.fixSentEmailSenderNames()
+            await self.updateAllConversationPreviews()
+        }
+        
         // Listen for message sent notifications
         NotificationCenter.default.addObserver(
             forName: NSNotification.Name("MessageSent"),
@@ -36,6 +43,185 @@ class DataSyncService: ObservableObject {
         NotificationCenter.default.removeObserver(self)
         syncTimer?.invalidate()
         syncTimer = nil
+    }
+    
+    // MARK: - Migration
+    
+    func mergeDuplicateConversations() async {
+        do {
+            // Get all conversations
+            let allConversations = try modelContext.fetch(FetchDescriptor<Conversation>())
+            
+            // Group conversations by normalized email
+            var conversationGroups: [String: [Conversation]] = [:]
+            for conversation in allConversations {
+                let normalizedEmail = conversation.contactEmail.lowercased()
+                if conversationGroups[normalizedEmail] == nil {
+                    conversationGroups[normalizedEmail] = []
+                }
+                conversationGroups[normalizedEmail]?.append(conversation)
+            }
+            
+            // Merge duplicate conversations
+            for (email, conversations) in conversationGroups where conversations.count > 1 {
+                print("🔀 Merging \(conversations.count) duplicate conversations for \(email)")
+                
+                // Sort by timestamp to keep the most recent as primary
+                let sortedConversations = conversations.sorted { $0.lastMessageTimestamp > $1.lastMessageTimestamp }
+                guard let primaryConversation = sortedConversations.first else { continue }
+                
+                // Update primary conversation email to normalized version
+                primaryConversation.contactEmail = email
+                
+                // Merge emails from duplicate conversations into primary
+                for duplicateConversation in sortedConversations.dropFirst() {
+                    // Move all emails to the primary conversation
+                    for email in duplicateConversation.emails {
+                        email.conversation = primaryConversation
+                        primaryConversation.emails.append(email)
+                    }
+                    
+                    // Delete the duplicate conversation
+                    modelContext.delete(duplicateConversation)
+                }
+                
+                // Update primary conversation metadata
+                if let latestEmail = primaryConversation.sortedEmails.last {
+                    primaryConversation.lastMessageTimestamp = latestEmail.timestamp
+                    primaryConversation.lastMessageSnippet = latestEmail.snippet
+                    primaryConversation.isRead = primaryConversation.emails.allSatisfy { $0.isRead }
+                }
+            }
+            
+            // Now remove duplicate emails within each conversation
+            await removeDuplicateEmails()
+            
+            // Save changes
+            try modelContext.save()
+            print("✅ Duplicate conversation merge complete")
+            
+        } catch {
+            print("❌ Error merging duplicate conversations: \(error)")
+        }
+    }
+    
+    func fixSentEmailSenderNames() async {
+        do {
+            // Get user display name
+            guard gmailService.isAuthenticated else { return }
+            let userDisplayName = try? await gmailService.getUserDisplayName()
+            guard let displayName = userDisplayName else { return }
+            
+            // Get all sent emails
+            let descriptor = FetchDescriptor<Email>(
+                predicate: #Predicate<Email> { email in
+                    email.isFromMe == true
+                }
+            )
+            let sentEmails = try modelContext.fetch(descriptor)
+            
+            var updatedCount = 0
+            for email in sentEmails {
+                // Update sender name if it's just an email address
+                if email.sender == email.senderEmail || email.sender == "Me" {
+                    email.sender = displayName
+                    updatedCount += 1
+                }
+            }
+            
+            if updatedCount > 0 {
+                try modelContext.save()
+                print("✅ Updated sender name for \(updatedCount) sent emails to '\(displayName)'")
+            }
+            
+        } catch {
+            print("❌ Error fixing sender names: \(error)")
+        }
+    }
+    
+    func updateAllConversationPreviews() async {
+        do {
+            let allConversations = try modelContext.fetch(FetchDescriptor<Conversation>())
+            var updatedCount = 0
+            
+            for conversation in allConversations {
+                // Get the most recent email in the conversation
+                // sortedEmails sorts by timestamp ascending, so last is newest
+                if let latestEmail = conversation.sortedEmails.last {
+                    // Always update to ensure we have the correct preview
+                    conversation.lastMessageSnippet = latestEmail.snippet
+                    conversation.lastMessageTimestamp = latestEmail.timestamp
+                    updatedCount += 1
+                    print("🔄 Updated preview for \(conversation.contactEmail) to: \(latestEmail.snippet.prefix(50))... (timestamp: \(latestEmail.timestamp))")
+                } else if !conversation.emails.isEmpty {
+                    // Fallback if sortedEmails doesn't work for some reason
+                    let sortedEmails = conversation.emails.sorted { $0.timestamp < $1.timestamp }
+                    if let latestEmail = sortedEmails.last {
+                        conversation.lastMessageSnippet = latestEmail.snippet
+                        conversation.lastMessageTimestamp = latestEmail.timestamp
+                        updatedCount += 1
+                        print("🔄 Updated preview (fallback) for \(conversation.contactEmail)")
+                    }
+                }
+            }
+            
+            if updatedCount > 0 {
+                try modelContext.save()
+                print("✅ Updated previews for \(updatedCount) conversations to show most recent messages")
+            }
+            
+        } catch {
+            print("❌ Error updating conversation previews: \(error)")
+        }
+    }
+    
+    func removeDuplicateEmails() async {
+        do {
+            let allConversations = try modelContext.fetch(FetchDescriptor<Conversation>())
+            
+            for conversation in allConversations {
+                var seenBodies = Set<String>()
+                var emailsToRemove: [Email] = []
+                
+                // Sort emails by timestamp to keep the oldest version
+                let sortedEmails = conversation.emails.sorted { $0.timestamp < $1.timestamp }
+                
+                for email in sortedEmails {
+                    let normalizedBody = email.body.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+                    
+                    // Check if we've seen this exact message before (same recipient and body)
+                    let messageKey = "\(email.recipientEmail.lowercased()):\(normalizedBody)"
+                    
+                    if seenBodies.contains(messageKey) {
+                        print("🗑️ Removing duplicate email to \(email.recipientEmail): \(email.snippet.prefix(30))...")
+                        emailsToRemove.append(email)
+                    } else {
+                        seenBodies.insert(messageKey)
+                    }
+                }
+                
+                // Remove duplicates
+                for email in emailsToRemove {
+                    conversation.emails.removeAll { $0.id == email.id }
+                    modelContext.delete(email)
+                }
+                
+                if !emailsToRemove.isEmpty {
+                    print("✅ Removed \(emailsToRemove.count) duplicate emails from conversation with \(conversation.contactEmail)")
+                    
+                    // Update conversation metadata
+                    if let latestEmail = conversation.sortedEmails.last {
+                        conversation.lastMessageTimestamp = latestEmail.timestamp
+                        conversation.lastMessageSnippet = latestEmail.snippet
+                    }
+                }
+            }
+            
+            try modelContext.save()
+            
+        } catch {
+            print("❌ Error removing duplicate emails: \(error)")
+        }
     }
     
     // MARK: - Auto Sync
@@ -107,7 +293,8 @@ class DataSyncService: ObservableObject {
             let existingConversations = try modelContext.fetch(FetchDescriptor<Conversation>())
             var conversationMap: [String: Conversation] = [:]
             for conversation in existingConversations {
-                conversationMap[conversation.contactEmail] = conversation
+                // Use lowercase email as key for case-insensitive matching
+                conversationMap[conversation.contactEmail.lowercased()] = conversation
                 
                 // Update conversation name if we have a better one from contacts
                 if let addressBookName = contactsService.getContactName(for: conversation.contactEmail),
@@ -149,7 +336,7 @@ class DataSyncService: ObservableObject {
                     }
                     
                     if hasRecentLocal {
-                        print("⏭️ DataSyncService: Skipping duplicate sent message to \(email.recipientEmail) with body: \(email.snippet.prefix(30))...")
+                        print("⏭️ DataSyncService: Found duplicate sent message to \(email.recipientEmail) with body: \(email.snippet.prefix(30))...")
                         
                         // Find and remove the local copy to replace with the synced version
                         if let localCopy = matchingLocalEmails.first(where: { 
@@ -166,13 +353,14 @@ class DataSyncService: ObservableObject {
                             modelContext.delete(localCopy)
                         }
                         
-                        // Don't add the synced version - we'll let it be added normally below
-                        // This ensures we keep the Gmail message ID for future duplicate detection
+                        // Now add the synced version with the proper Gmail message ID
+                        // This continues below to add the email normally
                     }
                 }
                 
                 // Find or create conversation
-                let contactEmail = email.isFromMe ? email.recipientEmail : email.senderEmail
+                // Normalize email to lowercase for consistent conversation grouping
+                let contactEmail = (email.isFromMe ? email.recipientEmail : email.senderEmail).lowercased()
                 var contactName = email.isFromMe ? email.recipient : email.sender
                 
                 // Try to get the contact name from the address book
@@ -204,7 +392,7 @@ class DataSyncService: ObservableObject {
                 } else {
                     conversation = Conversation(
                         contactName: contactName,
-                        contactEmail: contactEmail,
+                        contactEmail: contactEmail,  // Store lowercase email
                         lastMessageTimestamp: email.timestamp,
                         lastMessageSnippet: email.snippet,
                         isRead: email.isRead
@@ -224,21 +412,18 @@ class DataSyncService: ObservableObject {
                 
                 newMessageCount += 1
                 
-                // Always update conversation metadata for received messages
-                // For sent messages, only update if newer (they might have been locally sent already)
-                if !email.isFromMe {
-                    // Always update for received messages to ensure proper ordering
-                    conversation.lastMessageTimestamp = email.timestamp
-                    conversation.lastMessageSnippet = email.snippet
-                    if !email.isRead {
-                        conversation.isRead = false
-                    }
-                    print("📅 DataSyncService: Updated conversation timestamp to \(email.timestamp) for RECEIVED message from \(conversation.contactEmail)")
-                } else if email.timestamp > conversation.lastMessageTimestamp {
-                    // Only update for sent messages if they're newer
-                    conversation.lastMessageTimestamp = email.timestamp
-                    conversation.lastMessageSnippet = email.snippet
-                    print("📅 DataSyncService: Updated conversation timestamp to \(email.timestamp) for SENT message to \(conversation.contactEmail)")
+                // Update read status for received messages
+                if !email.isFromMe && !email.isRead {
+                    conversation.isRead = false
+                }
+            }
+            
+            // After processing all emails, update conversation previews to show the most recent message
+            for (_, conversation) in conversationMap {
+                if let latestEmail = conversation.sortedEmails.last {
+                    conversation.lastMessageTimestamp = latestEmail.timestamp
+                    conversation.lastMessageSnippet = latestEmail.snippet
+                    print("📊 Final preview for \(conversation.contactEmail): \(latestEmail.snippet.prefix(30))...")
                 }
             }
             

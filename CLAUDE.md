@@ -44,22 +44,22 @@ xcodebuild clean build -project ESC.xcodeproj -scheme ESC -configuration Debug -
 ## Core Architecture
 
 ### Data Layer (SwiftData)
-- **Email**: Individual email messages with sender, recipient, body, timestamp, read status, subject, and reply tracking (inReplyToMessageId)
-- **Conversation**: Aggregated container grouping emails by contact with metadata (last message, read status)
+- **Email**: Individual email messages with sender, recipient, body, timestamp, read status, subject, and reply tracking (inReplyToMessageId). Email addresses are normalized to lowercase for consistent grouping.
+- **Conversation**: Aggregated container grouping emails by contact with metadata (last message preview, read status). Preview always shows the most recent message.
 - **Attachment**: File attachments with inline display for images and QuickLook preview for documents
 - Threading logic groups all emails to/from the same contact regardless of subject
 
 ### UI Layer (SwiftUI)
-- **ConversationListView**: Main inbox with white edge-to-edge design, conversations sorted by timestamp
-- **ConversationDetailView**: iMessage-style chat interface with message bubbles, reply/forward functionality
+- **ConversationListView**: Main inbox with white edge-to-edge design, conversations sorted by timestamp showing most recent message preview
+- **ConversationDetailView**: iMessage-style chat interface with message bubbles, reply/forward functionality - **IMPORTANT: New message composition happens here, not in ComposeView**
 - **ComposeView**: Standalone compose view (currently unused - new messages use ConversationDetailView)
 - **AuthenticationView**: Google OAuth authentication interface
 - Clean white backgrounds throughout, no gray padding
 
 ### Service Layer
-- **GmailService**: Complete Gmail API integration for fetching, parsing, and sending emails with reply support
+- **GmailService**: Complete Gmail API integration for fetching, parsing, and sending emails with reply support. Fetches user display name for proper From headers.
 - **GoogleAuthManager**: OAuth 2.0 authentication using ASWebAuthenticationSession
-- **DataSyncService**: Background sync service with timer-based polling (10-second intervals)
+- **DataSyncService**: Background sync service with timer-based polling (10-second intervals), duplicate detection, and conversation merging
 - **ContactsService**: iOS Contacts integration with photo caching and name resolution
 
 ## Key Files and Responsibilities
@@ -71,7 +71,7 @@ xcodebuild clean build -project ESC.xcodeproj -scheme ESC -configuration Debug -
 
 ### Views (`ESC/Views/`)
 - `ConversationListView.swift`: Main inbox with Gmail integration and compose button
-- `ConversationDetailView.swift`: Chat interface with message bubbles, reply/forward actions, and input - **IMPORTANT: New message composition happens here, not in ComposeView**
+- `ConversationDetailView.swift`: Chat interface with message bubbles, reply/forward actions, and input
 - `AuthenticationView.swift`: Google sign-in flow with error handling
 - `ForwardComposeView.swift`: Dedicated view for forwarding emails with recipient selection
 
@@ -80,11 +80,12 @@ xcodebuild clean build -project ESC.xcodeproj -scheme ESC -configuration Debug -
 - `MessageInputView.swift`: Bottom input bar with attachment support and dynamic button states
 - `ContactAvatarView.swift`: Contact photo display with fallback to initials
 - `EmailReaderView.swift`: Full HTML email viewer for newsletters and formatted content
+- `LinkedTextView.swift`: Tappable links in message bubbles
 
 ### Services (`ESC/Services/`)
 - `GmailService.swift`: Gmail API integration with reply headers (In-Reply-To, References) support
 - `GoogleAuthManager.swift`: OAuth 2.0 flow using native iOS AuthenticationServices
-- `DataSyncService.swift`: Background sync service with duplicate detection for sent messages
+- `DataSyncService.swift`: Background sync with duplicate detection, conversation merging, and preview updates
 - `ContactsService.swift`: iOS Contacts integration with lowercase email mapping for case-insensitive lookups
 - `MessageParserService.swift`: Extracts email content, attachments, and headers including subject
 - `GmailAPIClient.swift`: Low-level Gmail API calls with token refresh handling
@@ -93,7 +94,9 @@ xcodebuild clean build -project ESC.xcodeproj -scheme ESC -configuration Debug -
 - `MessageCleaner.swift`: Email content cleaning to remove quoted text and signatures
 - `EmailMessageBuilder.swift`: RFC2822 message construction with multipart/MIME and reply headers support
 - `Base64Utils.swift`: Gmail's URL-safe base64 encoding/decoding
-- `EmailValidator.swift`: Email address validation and parsing
+- `EmailValidator.swift`: Email address validation and parsing with lowercase normalization
+- `LinkDetector.swift`: URL detection and extraction from message text
+- `Constants.swift`: App-wide configuration including OAuth scopes and UI constants
 
 ### Configuration Files
 - `GoogleService-Info.plist`: Google API credentials and project configuration
@@ -105,14 +108,15 @@ xcodebuild clean build -project ESC.xcodeproj -scheme ESC -configuration Debug -
 1. **GoogleAuthManager** handles OAuth 2.0 using ASWebAuthenticationSession
 2. Uses native iOS secure web authentication with proper URL scheme handling
 3. Automatic token refresh with error recovery
-4. Scopes: `gmail.readonly` and `gmail.send`
+4. Scopes: `gmail.modify`, `gmail.send`, `userinfo.profile`
 
 ### API Operations
 - **Fetch Messages**: `GmailService.fetchEmails()` retrieves and parses Gmail messages with attachments
-- **Send Messages**: `GmailService.sendEmail()` creates RFC2822 format emails with proper headers
+- **Send Messages**: `GmailService.sendEmail()` creates RFC2822 format emails with proper From headers using display name
 - **Reply Threading**: Maintains `In-Reply-To` and `References` headers for Gmail conversation threading
 - **Attachment Handling**: Downloads attachments on-demand, supports inline images and document previews
 - **Subject Preservation**: Fetches missing subjects from Gmail API when replying to maintain threading
+- **User Profile**: Fetches user display name from OAuth2 userinfo endpoint for proper sender identification
 
 ### Data Flow
 1. **Authentication**: User taps settings icon to authenticate or manages accounts
@@ -130,6 +134,7 @@ xcodebuild clean build -project ESC.xcodeproj -scheme ESC -configuration Debug -
 - **Context Menu**: Long-press for Reply and Forward options
 - **Attachment Display**: Inline images, file bubbles with icons for documents
 - **HTML Email Support**: "View full message" button for newsletters with full-screen reader
+- **Clickable Links**: URLs in messages are tappable and open in Safari
 
 ### Navigation Flow
 - **Main List**: Conversations sorted by last message timestamp with NavigationStack
@@ -137,7 +142,7 @@ xcodebuild clean build -project ESC.xcodeproj -scheme ESC -configuration Debug -
 - **Reply**: Stays on same conversation page with inline reply preview
 - **Forward**: Opens modal ForwardComposeView with original message content
 - **Authentication**: Modal sheet for Google sign-in
-- **Settings**: Modal sheet with account management options
+- **Settings**: Modal sheet with account management and cleanup options
 
 ### Modern Navigation Architecture
 - Uses `NavigationStack` with `NavigationPath` for iOS 16+ programmatic navigation
@@ -150,6 +155,7 @@ xcodebuild clean build -project ESC.xcodeproj -scheme ESC -configuration Debug -
 ### OAuth Configuration
 - Google credentials configured in `GoogleService-Info.plist`
 - URL schemes set up in `Info.plist` for OAuth redirects
+- Required scopes include gmail.modify, gmail.send, and userinfo.profile
 - No external package dependencies - uses native iOS frameworks only
 
 ### iOS Contacts Integration
@@ -193,8 +199,15 @@ The app uses a shared ModelContainer configured in `ESCApp.swift` with:
 - DataSyncService runs on 10-second timer when authenticated
 - Silent background sync prevents UI interruption
 - Duplicate detection for recently sent messages (5-minute window)
-- Conversation timestamps drive automatic sorting
+- Conversation timestamps and previews update automatically
 - New message notifications available via NotificationCenter
+- Automatic conversation merging for duplicate contacts on startup
+
+### Email Normalization
+- All email addresses stored lowercase for consistent conversation grouping
+- Prevents duplicate conversations from case variations (e.g., John@example.com vs john@example.com)
+- ContactsService uses lowercase keys for case-insensitive lookups
+- Conversation merging handles existing duplicates on app startup
 
 ### Contact Photo System
 - ContactAvatarView handles photo loading and caching
@@ -209,6 +222,12 @@ The app uses a shared ModelContainer configured in `ESCApp.swift` with:
 - QuickLook preview for documents
 - Base64 encoding for sending attachments via Gmail API
 - Multipart MIME message construction for emails with attachments
+
+### Settings and Maintenance
+- "Clean Up Duplicates" button removes duplicate messages within conversations
+- "Fix Message Previews" updates all conversation previews to show most recent message
+- "Switch Account" allows changing Google accounts while preserving local data
+- "Delete Account Data" removes all local emails and signs out
 
 ## Common Issues & Solutions
 
@@ -227,7 +246,17 @@ The app uses a shared ModelContainer configured in `ESCApp.swift` with:
 - Subjects are stored in Email model for future use
 - Check logs for "📬 Reply to email - Subject:" to debug subject issues
 
-### Duplicate Sent Messages
-- DataSyncService includes 5-minute duplicate detection window
-- Compares message body content to identify local copies vs synced versions
-- Replaces local copies with Gmail-synced versions to maintain proper message IDs
+### Duplicate Conversations or Messages
+- DataSyncService includes automatic deduplication on startup
+- Use Settings → "Clean Up Duplicates" to manually remove duplicate messages
+- Email normalization prevents new duplicates from case variations
+
+### Conversation Preview Shows Wrong Message
+- Use Settings → "Fix Message Previews" to update all previews
+- Previews automatically update during sync to show most recent message
+- Check DataSyncService logs for preview update confirmations
+
+### Sender Name Shows Email Instead of Display Name
+- Requires userinfo.profile scope in OAuth authentication
+- Sign out and sign back in to request new permissions
+- Check GmailService.getUserDisplayName() for proper name fetching

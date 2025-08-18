@@ -45,6 +45,32 @@ struct SettingsView: View {
                         }
                         
                         Button(action: {
+                            Task {
+                                await syncService?.removeDuplicateEmails()
+                            }
+                        }) {
+                            HStack {
+                                Image(systemName: "arrow.triangle.merge")
+                                    .foregroundColor(.orange)
+                                Text("Clean Up Duplicates")
+                                    .foregroundColor(.orange)
+                            }
+                        }
+                        
+                        Button(action: {
+                            Task {
+                                await syncService?.updateAllConversationPreviews()
+                            }
+                        }) {
+                            HStack {
+                                Image(systemName: "arrow.clockwise")
+                                    .foregroundColor(.green)
+                                Text("Fix Message Previews")
+                                    .foregroundColor(.green)
+                            }
+                        }
+                        
+                        Button(action: {
                             showingDeleteConfirmation = true
                         }) {
                             HStack {

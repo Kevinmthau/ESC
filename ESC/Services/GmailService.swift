@@ -8,6 +8,8 @@ class GmailService: ObservableObject {
     private var cancellables = Set<AnyCancellable>()
     
     @Published var isAuthenticated: Bool = false
+    private var cachedUserName: String?
+    private var cachedUserEmail: String?
     
     init() {
         // Subscribe to auth manager's authentication state
@@ -24,6 +26,8 @@ class GmailService: ObservableObject {
     
     func signOut() {
         authManager.signOut()
+        cachedUserName = nil
+        cachedUserEmail = nil
         print("✅ GmailService: User signed out")
     }
     
@@ -40,6 +44,9 @@ class GmailService: ObservableObject {
             throw GmailError.notAuthenticated
         }
         
+        // Get user display name for sent messages
+        let userDisplayName = try? await getUserDisplayName()
+        
         // Fetch message list first
         let messageIds = try await apiClient.fetchMessageIds()
         
@@ -49,6 +56,10 @@ class GmailService: ObservableObject {
             do {
                 let gmailMessage = try await apiClient.fetchMessage(messageId: messageId)
                 if let email = MessageParserService.parseGmailMessage(gmailMessage) {
+                    // For sent messages, use the cached display name instead of email address
+                    if email.isFromMe, let displayName = userDisplayName {
+                        email.sender = displayName
+                    }
                     // Fetch attachment data for each attachment
                     for attachment in email.attachments {
                         if attachment.data == nil && !attachment.id.isEmpty {
@@ -93,14 +104,15 @@ class GmailService: ObservableObject {
             throw GmailError.invalidRecipient
         }
         
-        // Get user's email address for From field
+        // Get user's email address and display name for From field
         let userEmail: String
+        let userDisplayName: String
         do {
-            let profile = try await apiClient.getUserProfile()
-            userEmail = profile.emailAddress
-            print("📧 Sending from: \(userEmail)")
+            userEmail = try await getUserEmail()
+            userDisplayName = try await getUserDisplayName()
+            print("📧 Sending from: \(userDisplayName) <\(userEmail)>")
         } catch {
-            print("❌ Failed to get user email: \(error)")
+            print("❌ Failed to get user info: \(error)")
             throw error
         }
         
@@ -123,8 +135,11 @@ class GmailService: ObservableObject {
         }
         
         // Create and validate email message
+        // Format the From field with display name: "Name <email@example.com>"
+        let fromField = userDisplayName != userEmail ? "\(userDisplayName) <\(userEmail)>" : userEmail
+        
         let messageBuilder = EmailMessageBuilder(
-            from: userEmail,
+            from: fromField,
             to: recipientEmail,
             subject: emailSubject,
             body: body,
@@ -157,8 +172,36 @@ class GmailService: ObservableObject {
     }
     
     func getUserEmail() async throws -> String {
+        // Return cached email if available
+        if let cachedEmail = cachedUserEmail {
+            return cachedEmail
+        }
+        
         let profile = try await apiClient.getUserProfile()
+        cachedUserEmail = profile.emailAddress
+        
+        // Also fetch and cache the user's name if we don't have it
+        if cachedUserName == nil {
+            cachedUserName = try? await apiClient.getUserName()
+        }
+        
         return profile.emailAddress
+    }
+    
+    func getUserDisplayName() async throws -> String {
+        // Return cached name if available
+        if let cachedName = cachedUserName {
+            return cachedName
+        }
+        
+        // Try to fetch the user's name
+        if let name = try? await apiClient.getUserName() {
+            cachedUserName = name
+            return name
+        }
+        
+        // Fall back to email address
+        return try await getUserEmail()
     }
     
     // MARK: - Fetch Single Message

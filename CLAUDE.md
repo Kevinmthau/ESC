@@ -100,6 +100,13 @@ let original = allEmails.first { $0.messageId == replyToId } ??
 - Reply → Inline in same conversation (no navigation)
 - New conversation → Empty Conversation object → ConversationDetailView
 
+#### Keyboard & Scrolling (ConversationDetailView)
+- Uses `GeometryReader` wrapper for proper layout calculation
+- `ScrollViewReader` with `defaultScrollAnchor(.bottom)` for chat-style scrolling
+- Automatic iOS keyboard avoidance (no manual keyboard height tracking)
+- Hidden scroll indicators for cleaner appearance
+- 50-point bottom spacer for better scroll behavior
+
 #### Group Conversation UI
 - MessageBubbleView accepts `isGroupConversation` flag
 - Sender names appear below message bubbles with timestamp
@@ -118,6 +125,14 @@ let original = allEmails.first { $0.messageId == replyToId } ??
 - Avoid `.frame(maxWidth: .infinity, maxHeight: .infinity)`
 - Use explicit frame constraints or `fixedSize`
 - Add `idealWidth` to TextFields
+
+### Keyboard Scrolling Issues
+**Problem**: Flickering or jarring animations when keyboard appears
+**Solution**: 
+- Use `defaultScrollAnchor(.bottom)` on ScrollView
+- Avoid manual keyboard height tracking
+- Let iOS handle keyboard avoidance automatically
+- Remove conflicting scroll animations on focus changes
 
 ### Group Reply Invalid Email
 **Problem**: Trying to send to comma-separated email string

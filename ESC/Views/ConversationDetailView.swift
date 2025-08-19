@@ -23,11 +23,9 @@ struct ConversationDetailView: View {
     @State private var refreshTrigger = 0
     @State private var isEditingRecipient = false
     @State private var filteredContacts: [(name: String, email: String)] = []
-    @State private var hasScrolledToBottom = false
     @Query private var conversations: [Conversation]
     @State private var forwardedEmail: Email?
     @State private var showingForwardCompose = false
-    @State private var keyboardHeight: CGFloat = 0
     @State private var replyingToEmail: Email? = nil
     
     private var conversationEmails: [Email] {
@@ -44,18 +42,20 @@ struct ConversationDetailView: View {
     }
     
     var body: some View {
-        VStack(spacing: 0) {
-            // For new conversations, show recipient field
-            if isNewConversation {
-                recipientSection
-            } else {
-                // Contact header with profile picture for existing conversations
-                ContactHeaderView(
-                    conversation: conversation
-                )
+        GeometryReader { geometry in
+            VStack(spacing: 0) {
+                // For new conversations, show recipient field
+                if isNewConversation {
+                    recipientSection
+                } else {
+                    // Contact header with profile picture for existing conversations
+                    ContactHeaderView(
+                        conversation: conversation
+                    )
+                }
+                
+                messageScrollView
             }
-            
-            messageScrollView
         }
         .navigationBarTitleDisplayMode(.inline)
         .navigationTitle(isNewConversation ? "New Message" : conversation.contactName)
@@ -141,28 +141,16 @@ struct ConversationDetailView: View {
                             
                             // Add invisible spacer at bottom for better scroll behavior
                             Color.clear
-                                .frame(height: 1)
+                                .frame(height: 50)
                                 .id("bottom")
                         }
                         .padding(.horizontal, 16)
-                        .padding(.vertical, 8)
-                        .padding(.bottom, keyboardHeight > 0 ? 20 : 0)
-                    }
-                }
-                .background(Color.white)
-                .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { notification in
-                    guard let keyboardValue = notification.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? NSValue else { return }
-                    let keyboardFrame = keyboardValue.cgRectValue
-                    withAnimation(.easeInOut(duration: 0.25)) {
-                        keyboardHeight = keyboardFrame.height
-                    }
-                }
-                .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in
-                    withAnimation(.easeInOut(duration: 0.25)) {
-                        keyboardHeight = 0
+                        .padding(.top, 8)
                     }
                 }
                 .scrollDismissesKeyboard(.interactively)
+                .defaultScrollAnchor(.bottom)
+                .scrollIndicators(.hidden)
                 .onAppear {
                     // Request contacts access and fetch contacts
                     Task {
@@ -178,19 +166,10 @@ struct ConversationDetailView: View {
                         loadEmails()
                         markAsRead()
                         
-                        // Immediately scroll to bottom without animation for instant positioning
-                        if let lastEmail = conversationEmails.last {
-                            print("📍 OnAppear: Instant scroll to last email \(lastEmail.id)")
-                            proxy.scrollTo(lastEmail.id, anchor: .bottom)
-                        }
-                        
-                        // Then scroll again with animation after a delay to ensure content is loaded
+                        // Initial scroll to bottom when view appears
                         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
                             if let lastEmail = conversationEmails.last {
-                                print("📍 OnAppear: Animated scroll to last email \(lastEmail.id)")
-                                withAnimation(.easeOut(duration: 0.2)) {
-                                    proxy.scrollTo(lastEmail.id, anchor: .bottom)
-                                }
+                                proxy.scrollTo(lastEmail.id, anchor: .bottom)
                             }
                         }
                     } else {
@@ -215,57 +194,43 @@ struct ConversationDetailView: View {
                         scrollToId = nil
                     }
                 }
-                .onChange(of: isTextFieldFocused) { _, focused in
-                    if focused {
-                        // Delay to let keyboard start showing
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+                .onChange(of: emails.count) { oldCount, newCount in
+                    // Scroll to bottom when new emails are added
+                    if newCount > oldCount {
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
                             if let lastEmail = conversationEmails.last {
-                                withAnimation(.easeInOut(duration: 0.25)) {
+                                withAnimation(.easeOut(duration: 0.3)) {
                                     proxy.scrollTo(lastEmail.id, anchor: .bottom)
                                 }
                             }
                         }
                     }
                 }
-                .onChange(of: emails.count) { oldCount, newCount in
-                    print("📊 Email count changed from \(oldCount) to \(newCount)")
-                    
-                    // Scroll to bottom when emails first load or when new emails are added
-                    if (oldCount == 0 && newCount > 0) || newCount > oldCount {
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                            if let lastEmail = conversationEmails.last {
-                                print("📍 ScrollToBottom: Scrolling to \(lastEmail.id)")
-                                proxy.scrollTo(lastEmail.id, anchor: .bottom)
-                                hasScrolledToBottom = true
-                            }
-                        }
-                    }
-                }
                 .onChange(of: refreshTrigger) { _, _ in
-                    print("🔄 ConversationDetailView: RefreshTrigger changed, reloading emails")
                     loadEmails()
                 }
                 .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("ConversationUpdated"))) { notification in
                     if let updatedConversation = notification.object as? Conversation,
                        updatedConversation.contactEmail == conversation.contactEmail {
-                        print("🔄 ConversationDetailView: Received update for this conversation, reloading emails")
                         loadEmails()
                     }
                 }
             }
             
-            // Reply preview if replying
-            if let replyEmail = replyingToEmail {
-                replyPreviewView(for: replyEmail)
+            VStack(spacing: 0) {
+                // Reply preview if replying
+                if let replyEmail = replyingToEmail {
+                    replyPreviewView(for: replyEmail)
+                }
+                
+                // Message input
+                MessageInputView(
+                    messageText: $messageText,
+                    selectedAttachments: $selectedAttachments,
+                    isTextFieldFocused: $isTextFieldFocused,
+                    onSend: sendMessage
+                )
             }
-            
-            // Message input
-            MessageInputView(
-                messageText: $messageText,
-                selectedAttachments: $selectedAttachments,
-                isTextFieldFocused: $isTextFieldFocused,
-                onSend: sendMessage
-            )
         }
     }
     
@@ -600,10 +565,7 @@ struct ConversationDetailView: View {
                         }
                         
                         // Trigger scroll to new message
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                            scrollToId = email.id
-                            print("🔄 Triggering scroll to message: \(email.id)")
-                        }
+                        scrollToId = email.id
                         
                         // Notify about the conversation update
                         NotificationCenter.default.post(

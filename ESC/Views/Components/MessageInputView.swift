@@ -35,8 +35,9 @@ struct MessageInputView: View {
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 8)
-            .background(Color.white)
+            .background(Color(.systemBackground))
         }
+        .background(Color(.systemBackground))
         .photosPicker(isPresented: $showingPhotoPicker, selection: $selectedPhotos, maxSelectionCount: 10, matching: .images)
         .onChange(of: selectedPhotos) { _, newValue in
             Task {

@@ -25,10 +25,14 @@ class GmailService: ObservableObject {
     }
     
     func signOut() {
-        authManager.signOut()
+        // Clear all cached user data
         cachedUserName = nil
         cachedUserEmail = nil
-        print("✅ GmailService: User signed out")
+        
+        // Sign out from auth manager (this should clear tokens)
+        authManager.signOut()
+        
+        print("✅ GmailService: User signed out and all cached data cleared")
     }
     
     // MARK: - Authentication

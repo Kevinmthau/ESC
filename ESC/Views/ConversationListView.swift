@@ -248,14 +248,7 @@ struct ConversationListView: View {
             }
             .sheet(isPresented: $showingSettings) {
                 SettingsView(gmailService: gmailService, syncService: syncService) {
-                    // Callback when authentication state changes
-                    if gmailService.isAuthenticated {
-                        syncService?.startAutoSync()
-                    } else {
-                        // Clear navigation when logged out
-                        navigationPath = NavigationPath()
-                        syncService?.stopAutoSync()
-                    }
+                    handleAuthenticationChange()
                 }
             }
             .alert("Error", isPresented: .constant(errorMessage != nil)) {
@@ -285,6 +278,37 @@ struct ConversationListView: View {
                     // Navigate to the conversation after forwarding
                     navigationPath.append(conversation)
                 }
+            }
+        }
+    }
+    
+    private func handleAuthenticationChange() {
+        Task { @MainActor in
+            if gmailService.isAuthenticated {
+                // User signed in with new account - reload everything
+                print("🔄 ConversationListView: Auth state changed - reloading conversations")
+                
+                // Reset sync state for new account
+                hasCompletedInitialSync = false
+                isInitialLoad = true
+                
+                // Force refresh by triggering the query to re-execute
+                refreshTrigger += 1
+                
+                // Start syncing for new account
+                if conversations.isEmpty {
+                    await syncService?.syncData()
+                    hasCompletedInitialSync = true
+                }
+                isInitialLoad = false
+                
+                syncService?.startAutoSync()
+            } else {
+                // User signed out - clear everything
+                navigationPath = NavigationPath()
+                refreshTrigger += 1  // Force UI refresh to show empty state
+                hasCompletedInitialSync = false
+                syncService?.stopAutoSync()
             }
         }
     }

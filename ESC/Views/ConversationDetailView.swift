@@ -19,6 +19,7 @@ struct ConversationDetailView: View {
     @State private var scrollToId: String?
     @FocusState private var isTextFieldFocused: Bool
     @FocusState private var isRecipientFocused: Bool
+    @FocusState private var isSimpleRecipientFocused: Bool
     @State private var emails: [Email] = []
     @State private var refreshTrigger = 0
     @State private var isEditingRecipient = false
@@ -80,10 +81,9 @@ struct ConversationDetailView: View {
     
     private var recipientSection: some View {
         VStack(spacing: 0) {
-            MultipleRecipientsField(
+            SimpleRecipientsField(
                 recipients: $toRecipients,
-                ccRecipients: $ccRecipients,
-                bccRecipients: $bccRecipients
+                isFieldFocused: _isSimpleRecipientFocused
             )
             
             Divider()
@@ -91,14 +91,9 @@ struct ConversationDetailView: View {
         }
         .background(Color.white)
         .onAppear {
-            // Initialize recipients for existing conversations
-            if !isNewConversation && toRecipients.isEmpty {
-                // For existing conversations, set the contact as the default recipient
-                if conversation.isGroupConversation {
-                    toRecipients = conversation.participantEmails
-                } else if !conversation.contactEmail.isEmpty {
-                    toRecipients = [conversation.contactEmail]
-                }
+            // Auto-focus the To field when composing new message
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                isSimpleRecipientFocused = true
             }
         }
     }
@@ -369,13 +364,14 @@ struct ConversationDetailView: View {
             }
             
             // For group conversations, create a unique key based on all participants
-            let isGroupMessage = toRecipients.count + ccRecipients.count + bccRecipients.count > 1
+            // For new conversations, we only use the To field (no CC/BCC)
+            let isGroupMessage = toRecipients.count > 1
             
             if isGroupMessage {
                 // Group conversation - create a new conversation with all participants
                 // Get user email to exclude from participants
                 let userEmail = gmailService.cachedUserEmail ?? ""
-                let allRecipients = Array(Set(toRecipients + ccRecipients + bccRecipients))
+                let allRecipients = Array(Set(toRecipients))
                 
                 // Filter out user's own email for display
                 let otherParticipants = allRecipients.filter { $0.lowercased() != userEmail.lowercased() }
@@ -485,10 +481,11 @@ struct ConversationDetailView: View {
                         )
                     } else {
                         print("👥 Sending to recipients: \(finalToRecipients.joined(separator: ", "))")
+                        // For new messages, CC and BCC will be empty arrays
                         try await gmailService.sendEmail(
                             to: finalToRecipients,
-                            cc: ccRecipients,
-                            bcc: bccRecipients,
+                            cc: [],  // No CC for new messages
+                            bcc: [], // No BCC for new messages
                             body: bodyToSend,
                             attachments: attachments
                         )
@@ -641,10 +638,10 @@ struct ConversationDetailView: View {
             senderEmail: senderEmail,
             recipient: primaryRecipientName,
             recipientEmail: primaryRecipient,
-            allRecipients: actualRecipients + ccRecipients + bccRecipients,
+            allRecipients: actualRecipients,  // For new messages, no CC/BCC
             toRecipients: actualRecipients,
-            ccRecipients: ccRecipients,
-            bccRecipients: bccRecipients,
+            ccRecipients: [],  // Empty for new messages
+            bccRecipients: [],  // Empty for new messages
             body: body,
             snippet: MessageCleaner.createCleanSnippet(body),
             timestamp: Date(),

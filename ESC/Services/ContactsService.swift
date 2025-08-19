@@ -236,4 +236,17 @@ class ContactsService: ObservableObject {
             }
         }
     }
+    
+    /// Clears all cached data when switching accounts
+    func clearCache() {
+        // Clear photo cache
+        clearPhotoCache()
+        
+        // Clear contacts list
+        DispatchQueue.main.async { [weak self] in
+            self?.contacts.removeAll()
+            self?.emailToContactMap.removeAll()
+            print("🗑️ ContactsService: Cleared all cached contact data")
+        }
+    }
 }

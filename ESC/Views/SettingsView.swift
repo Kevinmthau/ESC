@@ -206,31 +206,42 @@ struct SettingsView: View {
                 // Stop sync service first
                 syncService?.stopAutoSync()
                 
+                // Delete all attachments first (to avoid foreign key issues)
+                let attachments = try modelContext.fetch(FetchDescriptor<Attachment>())
+                print("📧 Deleting \(attachments.count) attachments...")
+                for attachment in attachments {
+                    modelContext.delete(attachment)
+                }
+                
                 // Delete all emails from previous account
                 let emails = try modelContext.fetch(FetchDescriptor<Email>())
+                print("📧 Deleting \(emails.count) emails...")
                 for email in emails {
                     modelContext.delete(email)
                 }
                 
                 // Delete all conversations from previous account
                 let conversations = try modelContext.fetch(FetchDescriptor<Conversation>())
+                print("💬 Deleting \(conversations.count) conversations...")
                 for conversation in conversations {
                     modelContext.delete(conversation)
                 }
                 
-                // Delete all attachments
-                let attachments = try modelContext.fetch(FetchDescriptor<Attachment>())
-                for attachment in attachments {
-                    modelContext.delete(attachment)
-                }
-                
+                // Force save and process pending changes
+                modelContext.processPendingChanges()
                 try modelContext.save()
                 
                 print("✅ SettingsView: Cleared all data from previous account")
                 
-                // Sign out from Gmail
+                // Clear any cached data in ContactsService
+                ContactsService.shared.clearCache()
+                
+                // Sign out from Gmail (this should clear auth tokens)
                 gmailService.signOut()
                 userEmail = ""
+                
+                // Small delay to ensure everything is cleared
+                try await Task.sleep(nanoseconds: 500_000_000) // 0.5 seconds
                 
                 // Notify parent view of auth change
                 onAuthChange?()

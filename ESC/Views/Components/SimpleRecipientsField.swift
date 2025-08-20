@@ -124,7 +124,7 @@ struct SimpleRecipientsField: View {
         let lowercaseQuery = query.lowercased()
         
         // Get all contacts
-        var allContacts = contactsService.contacts
+        let allContacts = contactsService.contacts
         
         // Filter contacts
         filteredContacts = allContacts.filter { contact in

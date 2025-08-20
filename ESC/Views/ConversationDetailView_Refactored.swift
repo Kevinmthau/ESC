@@ -47,7 +47,7 @@ struct ConversationDetailView_Refactored: View {
         .onAppear {
             setupView()
         }
-        .alert("Error", isPresented: $viewModel.showingError) {
+        .alert("Error", isPresented: $viewModel.showError) {
             Button("OK", role: .cancel) { }
         } message: {
             Text(viewModel.errorMessage)

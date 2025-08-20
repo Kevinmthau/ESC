@@ -3,7 +3,7 @@ import Contacts
 import ContactsUI
 import SwiftUI
 
-class ContactsService: ObservableObject {
+class ContactsService: ObservableObject, ContactsServiceProtocol {
     static let shared = ContactsService()
     
     private let contactStore = CNContactStore()
@@ -31,7 +31,8 @@ class ContactsService: ObservableObject {
     func requestAccess() async -> Bool {
         do {
             let granted = try await contactStore.requestAccess(for: .contacts)
-            await MainActor.run {
+            // Defer the update to avoid publishing during view updates
+            Task { @MainActor in
                 self.authorizationStatus = CNContactStore.authorizationStatus(for: .contacts)
             }
             return granted
@@ -85,7 +86,8 @@ class ContactsService: ObservableObject {
             let finalEmailMap = tempEmailToContactMap
             let finalPhotoCache = tempPhotoCache
             
-            await MainActor.run {
+            // Defer the update to the next run loop to avoid "Publishing changes from within view updates"
+            Task { @MainActor in
                 self.contacts = sortedContacts
                 self.emailToContactMap = finalEmailMap
                 self.contactPhotoCache = finalPhotoCache
@@ -112,7 +114,16 @@ class ContactsService: ObservableObject {
         return contacts
     }
     
-    func getContactPhoto(for email: String) -> UIImage? {
+    // Protocol conformance method - returns Data
+    func getContactPhoto(for email: String) async -> Data? {
+        if let image = getContactPhotoImage(for: email) {
+            return image.pngData()
+        }
+        return nil
+    }
+    
+    // Original method for UIImage
+    func getContactPhotoImage(for email: String) -> UIImage? {
         let normalizedEmail = email.lowercased()
         
         // Check memory cache first

@@ -144,7 +144,8 @@ struct ConversationDetailView: View {
                     }
                 }
                 .scrollDismissesKeyboard(.interactively)
-                .defaultScrollAnchor(.bottom)
+                // Only anchor to bottom if there are multiple messages
+                .defaultScrollAnchor(conversationEmails.count > 1 ? .bottom : .top)
                 .scrollIndicators(.hidden)
                 .onAppear {
                     // Request contacts access and fetch contacts
@@ -516,11 +517,14 @@ struct ConversationDetailView: View {
                 print("   snippet: \(email.snippet)")
                 
                 await MainActor.run {
-                    // Clear message text and attachments immediately for better UX
-                    messageText = ""
-                    selectedAttachments = []
-                    replyingToEmail = nil
-                    isSending = false
+                    // Defer state changes to avoid modifying during view update
+                    Task { @MainActor in
+                        // Clear message text and attachments immediately for better UX
+                        messageText = ""
+                        selectedAttachments = []
+                        replyingToEmail = nil
+                        isSending = false
+                    }
                     
                     // Insert email first to ensure it's in the database
                     modelContext.insert(email)
@@ -561,8 +565,10 @@ struct ConversationDetailView: View {
                             print("⚠️ Email already in local state, skipping addition")
                         }
                         
-                        // Trigger scroll to new message
-                        scrollToId = email.id
+                        // Trigger scroll to new message (deferred to avoid view update issue)
+                        Task { @MainActor in
+                            scrollToId = email.id
+                        }
                         
                         // Notify about the conversation update
                         NotificationCenter.default.post(
@@ -594,7 +600,10 @@ struct ConversationDetailView: View {
                 }
             } catch {
                 await MainActor.run {
-                    isSending = false
+                    // Defer state changes to avoid modifying during view update
+                    Task { @MainActor in
+                        isSending = false
+                    }
                     handleError(error)
                 }
             }
@@ -805,9 +814,12 @@ struct ConversationDetailView: View {
     }
     
     private func handleError(_ error: Error) {
-        isSending = false
-        errorMessage = error.localizedDescription
-        showingError = true
+        // Defer state changes to avoid modifying during view update
+        Task { @MainActor in
+            isSending = false
+            errorMessage = error.localizedDescription
+            showingError = true
+        }
     }
     
     private func extractNameFromEmail(_ email: String) -> String {

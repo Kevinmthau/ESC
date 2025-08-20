@@ -7,14 +7,13 @@ struct ForwardComposeView: View {
     let modelContext: ModelContext
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var contactsService: ContactsService
-    @State private var recipientEmail = ""
+    @State private var toRecipients: [String] = []
     @State private var messageText = ""
+    @State private var showingRecipientSection = true
     @State private var isSending = false
     @State private var showingError = false
     @State private var errorMessage = ""
-    @FocusState private var isRecipientFocused: Bool
-    @State private var isEditingRecipient = false
-    @State private var filteredContacts: [(name: String, email: String)] = []
+    @FocusState private var isRecipientFieldFocused: Bool
     @Query private var conversations: [Conversation]
     @State private var navigationPath = NavigationPath()
     
@@ -31,21 +30,67 @@ struct ForwardComposeView: View {
     var body: some View {
         NavigationStack(path: $navigationPath) {
             VStack(spacing: 0) {
-                // To field
-                recipientSection
+                // Recipients section with collapse/expand
+                if showingRecipientSection {
+                    SimpleRecipientsField(
+                        recipients: $toRecipients,
+                        isFieldFocused: _isRecipientFieldFocused
+                    )
+                    
+                    Divider()
+                }
                 
-                Divider()
+                // Collapse/expand header for recipients
+                if !showingRecipientSection && !toRecipients.isEmpty {
+                    HStack {
+                        Text("To: \(formatRecipientsList(toRecipients))")
+                            .font(.system(size: 14))
+                            .foregroundColor(.secondary)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                        
+                        Spacer()
+                        
+                        Button(action: {
+                            withAnimation(.easeInOut(duration: 0.2)) {
+                                showingRecipientSection.toggle()
+                            }
+                        }) {
+                            Image(systemName: "chevron.down")
+                                .font(.system(size: 12))
+                                .foregroundColor(.secondary)
+                        }
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 8)
+                    .background(Color(.systemGray6))
+                    .onTapGesture {
+                        withAnimation(.easeInOut(duration: 0.2)) {
+                            showingRecipientSection = true
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                                isRecipientFieldFocused = true
+                            }
+                        }
+                    }
+                    
+                    Divider()
+                }
                 
                 // Message composition area
-                ScrollView {
-                    TextEditor(text: $messageText)
-                        .padding(.horizontal, 16)
-                        .padding(.top, 12)
-                        .frame(minHeight: 300)
-                        .scrollContentBackground(.hidden)
-                        .background(Color.clear)
-                }
-                .background(Color.white)
+                TextEditor(text: $messageText)
+                    .padding(.horizontal, 16)
+                    .padding(.top, 12)
+                    .scrollContentBackground(.hidden)
+                    .background(Color.white)
+                    .onTapGesture {
+                        // Collapse recipients when tapping message area
+                        if showingRecipientSection && !toRecipients.isEmpty {
+                            withAnimation(.easeInOut(duration: 0.2)) {
+                                showingRecipientSection = false
+                                isRecipientFieldFocused = false
+                            }
+                        }
+                    }
                 
                 // Send button
                 HStack {
@@ -60,7 +105,7 @@ struct ForwardComposeView: View {
                                 .fontWeight(.semibold)
                         }
                     }
-                    .disabled(recipientEmail.isEmpty || isSending)
+                    .disabled(toRecipients.isEmpty || isSending)
                     .padding()
                 }
             }
@@ -83,9 +128,7 @@ struct ForwardComposeView: View {
         .onAppear {
             // Focus recipient field immediately
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                isRecipientFocused = true
-                isEditingRecipient = true
-                updateFilteredContacts()
+                isRecipientFieldFocused = true
             }
         }
         .alert("Error", isPresented: $showingError) {
@@ -95,101 +138,22 @@ struct ForwardComposeView: View {
         }
     }
     
-    private var recipientSection: some View {
-        VStack(spacing: 0) {
-            HStack(spacing: 12) {
-                Text("To:")
-                    .font(.body)
-                    .foregroundColor(.primary)
-                    .frame(width: 30, alignment: .leading)
-                
-                TextField("Email address", text: $recipientEmail)
-                    .textFieldStyle(PlainTextFieldStyle())
-                    .keyboardType(.emailAddress)
-                    .autocorrectionDisabled()
-                    .textInputAutocapitalization(.never)
-                    .focused($isRecipientFocused)
-                    .onChange(of: recipientEmail) { _, newValue in
-                        isEditingRecipient = true
-                        updateFilteredContacts()
-                    }
-                    .onChange(of: isRecipientFocused) { _, focused in
-                        isEditingRecipient = focused
-                        if focused {
-                            updateFilteredContacts()
-                        }
-                    }
-                
-                Button(action: {
-                    Task {
-                        if contactsService.authorizationStatus != .authorized {
-                            _ = await contactsService.requestAccess()
-                        }
-                        if contactsService.authorizationStatus == .authorized {
-                            await contactsService.fetchContacts()
-                            updateFilteredContacts()
-                        }
-                    }
-                }) {
-                    Image(systemName: "plus.circle.fill")
-                        .font(.title2)
-                        .foregroundColor(.blue)
-                }
+    private func formatRecipientsList(_ recipients: [String]) -> String {
+        if recipients.isEmpty {
+            return ""
+        } else if recipients.count == 1 {
+            if let name = contactsService.getContactName(for: recipients[0]) {
+                return name
             }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 12)
-            
-            // Contact suggestions dropdown
-            if isEditingRecipient && !filteredContacts.isEmpty {
-                VStack(spacing: 0) {
-                    ForEach(filteredContacts.prefix(5), id: \.email) { contact in
-                        Button(action: {
-                            recipientEmail = contact.email
-                            isEditingRecipient = false
-                            isRecipientFocused = false
-                        }) {
-                            HStack {
-                                ContactAvatarView(
-                                    email: contact.email,
-                                    name: contact.name,
-                                    size: 32
-                                )
-                                
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(contact.name)
-                                        .font(.body)
-                                        .foregroundColor(.primary)
-                                    Text(contact.email)
-                                        .font(.caption)
-                                        .foregroundColor(.secondary)
-                                }
-                                
-                                Spacer()
-                            }
-                            .padding(.horizontal, 16)
-                            .padding(.vertical, 8)
-                        }
-                        .buttonStyle(PlainButtonStyle())
-                        
-                        if contact.email != filteredContacts.prefix(5).last?.email {
-                            Divider()
-                                .padding(.leading, 60)
-                        }
-                    }
-                }
-                .background(Color.white)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 8)
-                        .stroke(Color.gray.opacity(0.2), lineWidth: 1)
-                )
-                .padding(.horizontal, 16)
-                .zIndex(1000)
-            }
+            return recipients[0]
+        } else {
+            let firstRecipient = contactsService.getContactName(for: recipients[0]) ?? recipients[0]
+            return "\(firstRecipient) and \(recipients.count - 1) other\(recipients.count == 2 ? "" : "s")"
         }
     }
     
     private func sendForwardedMessage() {
-        guard !recipientEmail.isEmpty else { return }
+        guard !toRecipients.isEmpty else { return }
         
         isSending = true
         
@@ -213,180 +177,180 @@ struct ForwardComposeView: View {
                 
                 // Send the email with attachments
                 try await gmailService.sendEmail(
-                    to: recipientEmail,
+                    to: toRecipients,
                     body: messageText,
                     attachments: attachments
                 )
                 
-                // Find or create conversation
-                let normalizedRecipientEmail = recipientEmail.lowercased()
-                let descriptor = FetchDescriptor<Conversation>(
-                    predicate: #Predicate<Conversation> { conv in
-                        conv.contactEmail == normalizedRecipientEmail
+                // Check if conversation already exists
+                let targetConversation: Conversation
+                if toRecipients.count == 1 {
+                    // Single recipient
+                    let recipient = toRecipients[0]
+                    if let existing = conversations.first(where: { 
+                        !$0.isGroupConversation && $0.contactEmail.lowercased() == recipient.lowercased() 
+                    }) {
+                        targetConversation = existing
+                    } else {
+                        // Create new single conversation
+                        let conversation = Conversation(
+                            contactName: contactsService.getContactName(for: recipient) ?? extractNameFromEmail(recipient),
+                            contactEmail: recipient.lowercased(),
+                            lastMessageTimestamp: Date(),
+                            lastMessageSnippet: MessageCleaner.createCleanSnippet(messageText)
+                        )
+                        conversation.isGroupConversation = false
+                        modelContext.insert(conversation)
+                        try modelContext.save()
+                        targetConversation = conversation
                     }
-                )
-                
-                let existingConversations = try modelContext.fetch(descriptor)
-                let conversation: Conversation
-                
-                if let existing = existingConversations.first {
-                    conversation = existing
                 } else {
-                    // Extract name from email or contacts
-                    let contactName = contactsService.getContactName(for: recipientEmail) ?? extractNameFromEmail(recipientEmail)
+                    // Group conversation
+                    let sortedRecipients = toRecipients.map { $0.lowercased() }.sorted()
+                    let conversationKey = sortedRecipients.joined(separator: ",")
                     
-                    conversation = Conversation(
-                        contactName: contactName,
-                        contactEmail: normalizedRecipientEmail,
-                        lastMessageTimestamp: Date(),
-                        lastMessageSnippet: messageText.prefix(100).trimmingCharacters(in: .whitespacesAndNewlines),
-                        isRead: true
-                    )
-                    modelContext.insert(conversation)
+                    if let existing = conversations.first(where: {
+                        $0.isGroupConversation && 
+                        $0.participantEmails.sorted() == sortedRecipients
+                    }) {
+                        targetConversation = existing
+                    } else {
+                        // Create new group conversation
+                        let conversation = Conversation(
+                            contactName: formatRecipientsList(toRecipients),
+                            contactEmail: conversationKey,
+                            lastMessageTimestamp: Date(),
+                            lastMessageSnippet: MessageCleaner.createCleanSnippet(messageText)
+                        )
+                        conversation.isGroupConversation = true
+                        conversation.participantEmails = toRecipients
+                        modelContext.insert(conversation)
+                        try modelContext.save()
+                        targetConversation = conversation
+                    }
                 }
                 
-                // Create local email record
-                let sentEmail = Email(
+                // Create the local email record
+                let email = Email(
                     id: UUID().uuidString,
-                    messageId: "local-\(UUID().uuidString)",
+                    messageId: UUID().uuidString,
+                    threadId: originalEmail.threadId,
                     sender: userName,
                     senderEmail: userEmail,
-                    recipient: conversation.contactName,
-                    recipientEmail: recipientEmail,
+                    recipient: toRecipients.count == 1 ? 
+                        (contactsService.getContactName(for: toRecipients[0]) ?? extractNameFromEmail(toRecipients[0])) :
+                        formatRecipientsList(toRecipients),
+                    recipientEmail: toRecipients.first ?? "",
+                    allRecipients: toRecipients,
+                    toRecipients: toRecipients,
+                    ccRecipients: [],
+                    bccRecipients: [],
                     body: messageText,
-                    snippet: String(messageText.prefix(100)),
+                    snippet: MessageCleaner.createCleanSnippet(messageText),
                     timestamp: Date(),
+                    isRead: true,
                     isFromMe: true,
-                    conversation: conversation
+                    conversation: targetConversation,
+                    subject: "Fwd: \(originalEmail.subject ?? "(no subject)")"
                 )
                 
-                // Copy attachments to new email
+                // Copy attachments to the new email
                 for attachment in originalEmail.attachments {
-                    if let data = attachment.data {
-                        let newAttachment = Attachment(
-                            id: attachment.id,
-                            filename: attachment.filename,
-                            mimeType: attachment.mimeType,
-                            size: attachment.size,
-                            data: data
-                        )
-                        newAttachment.email = sentEmail
-                        sentEmail.attachments.append(newAttachment)
-                        modelContext.insert(newAttachment)
-                    }
+                    let newAttachment = Attachment(
+                        id: UUID().uuidString,
+                        filename: attachment.filename,
+                        mimeType: attachment.mimeType,
+                        size: attachment.size,
+                        data: attachment.data
+                    )
+                    newAttachment.email = email
+                    email.attachments.append(newAttachment)
                 }
                 
-                conversation.addEmail(sentEmail)
-                modelContext.insert(sentEmail)
+                modelContext.insert(email)
                 
-                // Update conversation metadata
-                conversation.lastMessageTimestamp = sentEmail.timestamp
-                conversation.lastMessageSnippet = sentEmail.snippet
+                // Update conversation
+                targetConversation.lastMessageTimestamp = email.timestamp
+                targetConversation.lastMessageSnippet = email.snippet
+                targetConversation.isRead = true
+                targetConversation.emails.append(email)
                 
                 try modelContext.save()
                 
-                // Dismiss and navigate to conversation
-                dismiss()
-                
-                // Post notification to navigate to conversation
-                NotificationCenter.default.post(
-                    name: NSNotification.Name("NavigateToConversation"),
-                    object: conversation
-                )
-                
+                // Navigate to conversation
+                await MainActor.run {
+                    dismiss()
+                    
+                    // Post notification to navigate
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                        NotificationCenter.default.post(
+                            name: NSNotification.Name("NavigateToConversation"),
+                            object: targetConversation
+                        )
+                    }
+                }
             } catch {
-                handleError(error)
+                await MainActor.run {
+                    errorMessage = error.localizedDescription
+                    showingError = true
+                    isSending = false
+                }
             }
         }
-    }
-    
-    private func updateFilteredContacts() {
-        var allContacts: [(name: String, email: String)] = []
-        var seenEmails = Set<String>()
-        
-        // Add conversation contacts first
-        for conversation in conversations {
-            let email = conversation.contactEmail.lowercased()
-            if !seenEmails.contains(email) && !email.isEmpty {
-                allContacts.append((name: conversation.contactName, email: conversation.contactEmail))
-                seenEmails.insert(email)
-            }
-        }
-        
-        // Add address book contacts
-        for contact in contactsService.contacts {
-            let email = contact.email.lowercased()
-            if !seenEmails.contains(email) && !email.isEmpty {
-                allContacts.append(contact)
-                seenEmails.insert(email)
-            }
-        }
-        
-        // Filter based on query
-        if recipientEmail.isEmpty {
-            filteredContacts = Array(allContacts.prefix(10))
-        } else {
-            let query = recipientEmail.lowercased()
-            filteredContacts = allContacts.filter { contact in
-                contact.name.lowercased().contains(query) ||
-                contact.email.lowercased().contains(query)
-            }
-        }
-        
-        filteredContacts = Array(filteredContacts.prefix(5))
-    }
-    
-    private func handleError(_ error: Error) {
-        isSending = false
-        errorMessage = error.localizedDescription
-        showingError = true
     }
     
     private func extractNameFromEmail(_ email: String) -> String {
-        // Try to get name from contacts first
-        if let name = contactsService.getContactName(for: email) {
-            return name
+        let components = email.split(separator: "@")
+        if let localPart = components.first {
+            return String(localPart).replacingOccurrences(of: ".", with: " ").capitalized
         }
-        
-        // Extract from email address
-        let nameFromEmail = email.split(separator: "@").first?.replacingOccurrences(of: ".", with: " ").capitalized ?? email
-        return nameFromEmail != email ? nameFromEmail : email
+        return email
     }
     
-    private static func formatForwardedMessage(_ email: Email) -> String {
+    static func formatForwardedMessage(_ email: Email) -> String {
         let dateFormatter = DateFormatter()
-        dateFormatter.dateFormat = "EEE, MMM d, yyyy 'at' h:mm a"
+        dateFormatter.dateStyle = .medium
+        dateFormatter.timeStyle = .short
         
-        var forwardedText = "---------- Forwarded message ---------\n"
-        forwardedText += "From: \(email.sender) <\(email.senderEmail)>\n"
-        forwardedText += "Date: \(dateFormatter.string(from: email.timestamp))\n"
-        
-        // Add subject if available (we'll use the snippet as subject for now)
-        let subject = email.snippet.prefix(50).trimmingCharacters(in: .whitespacesAndNewlines)
-        if !subject.isEmpty {
-            forwardedText += "Subject: \(subject)\n"
+        var result = "---------- Forwarded message ----------\n"
+        result += "From: \(email.sender) <\(email.senderEmail)>\n"
+        result += "Date: \(dateFormatter.string(from: email.timestamp))\n"
+        if let subject = email.subject {
+            result += "Subject: \(subject)\n"
         }
+        result += "To: \(email.recipient) <\(email.recipientEmail)>\n"
+        result += "\n"
+        result += email.body
         
-        forwardedText += "To: \(email.recipient) <\(email.recipientEmail)>\n\n"
+        return result
+    }
+}
+
+#Preview {
+    do {
+        let container = try ModelContainer(for: Email.self, Conversation.self, Attachment.self)
+        let modelContext = ModelContext(container)
         
-        // Add the body with ">" prefix for each line
-        let bodyLines = email.body.components(separatedBy: .newlines)
-        for line in bodyLines {
-            if !line.trimmingCharacters(in: .whitespaces).isEmpty {
-                forwardedText += "> \(line)\n"
-            } else {
-                forwardedText += ">\n"
-            }
-        }
-        
-        // Add attachment info if present
-        if !email.attachments.isEmpty {
-            forwardedText += "\n> Attachments:\n"
-            for attachment in email.attachments {
-                forwardedText += "> - \(attachment.filename) (\(attachment.formattedSize))\n"
-            }
-        }
-        
-        return forwardedText
+        return ForwardComposeView(
+            originalEmail: Email(
+                id: "1",
+                messageId: "1",
+                sender: "John Doe",
+                senderEmail: "john@example.com",
+                recipient: "Me",
+                recipientEmail: "me@example.com",
+                body: "This is the original message",
+                snippet: "This is the original message",
+                timestamp: Date(),
+                isFromMe: false,
+                conversation: nil,
+                subject: "Test Subject"
+            ),
+            gmailService: GmailService(),
+            modelContext: modelContext
+        )
+        .environmentObject(ContactsService.shared)
+    } catch {
+        return Text("Failed to create preview")
     }
 }

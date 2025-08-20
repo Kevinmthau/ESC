@@ -2,7 +2,7 @@ import Foundation
 import SwiftData
 
 @MainActor
-class DataSyncService: ObservableObject {
+class DataSyncService: ObservableObject, DataSyncServiceProtocol {
     private let modelContext: ModelContext
     private let gmailService: GmailService
     private let contactsService: ContactsService
@@ -224,6 +224,15 @@ class DataSyncService: ObservableObject {
         }
     }
     
+    // MARK: - Email Merging
+    
+    func mergeEmails(_ emails: [Email]) async {
+        // This method is called to merge fetched emails into the database
+        // The actual merging happens in syncData method
+        // This is a placeholder for protocol conformance
+        await syncData(silent: true)
+    }
+    
     // MARK: - Auto Sync
     
     func startAutoSync() {
@@ -360,6 +369,20 @@ class DataSyncService: ObservableObject {
             }
         }
         
+        // Ensure we have the current user's email address
+        var currentUserEmail = ""
+        if gmailService.isAuthenticated {
+            do {
+                currentUserEmail = try await gmailService.getUserEmail()
+                print("📧 DataSyncService: Syncing for user: \(currentUserEmail)")
+                // Update the cached email in case it was stale
+                gmailService.cachedUserEmail = currentUserEmail
+            } catch {
+                print("❌ DataSyncService: Failed to get user email: \(error)")
+                return
+            }
+        }
+        
         do {
             // Fetch new emails from Gmail (attachments are fetched in GmailService.fetchEmails)
             let fetchedEmails = try await gmailService.fetchEmails()
@@ -433,8 +456,8 @@ class DataSyncService: ObservableObject {
                     }
                 }
                 
-                // Get user email for filtering self from participants
-                let userEmail = gmailService.cachedUserEmail ?? ""
+                // Use the current user email we fetched at the start
+                let userEmail = currentUserEmail.isEmpty ? (gmailService.cachedUserEmail ?? "") : currentUserEmail
                 
                 // Find or create conversation based on participants
                 let conversationKey = createConversationKey(for: email, userEmail: userEmail)

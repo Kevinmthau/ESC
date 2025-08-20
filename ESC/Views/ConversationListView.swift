@@ -5,7 +5,7 @@ struct ConversationListView: View {
     @Environment(\.modelContext) private var modelContext
     @Query(sort: \Conversation.lastMessageTimestamp, order: .reverse) 
     private var allConversations: [Conversation]
-    @StateObject private var gmailService = GmailService()
+    @StateObject private var gmailService = DependencyContainer.shared.gmailService as! GmailService
     @EnvironmentObject private var contactsService: ContactsService
     @State private var syncService: DataSyncService?
     @State private var showingAuth = false
@@ -288,12 +288,44 @@ struct ConversationListView: View {
                 // User signed in with new account - reload everything
                 print("🔄 ConversationListView: Auth state changed - reloading conversations")
                 
+                // Clear any lingering data from previous account
+                do {
+                    // Fetch and delete any remaining conversations
+                    let remainingConversations = try modelContext.fetch(FetchDescriptor<Conversation>())
+                    if !remainingConversations.isEmpty {
+                        print("⚠️ Found \(remainingConversations.count) lingering conversations, removing...")
+                        for conversation in remainingConversations {
+                            modelContext.delete(conversation)
+                        }
+                    }
+                    
+                    // Fetch and delete any remaining emails
+                    let remainingEmails = try modelContext.fetch(FetchDescriptor<Email>())
+                    if !remainingEmails.isEmpty {
+                        print("⚠️ Found \(remainingEmails.count) lingering emails, removing...")
+                        for email in remainingEmails {
+                            modelContext.delete(email)
+                        }
+                    }
+                    
+                    // Save changes
+                    try modelContext.save()
+                } catch {
+                    print("❌ Error clearing lingering data: \(error)")
+                }
+                
                 // Reset sync state for new account
                 hasCompletedInitialSync = false
                 isInitialLoad = true
                 
+                // Clear navigation path
+                navigationPath = NavigationPath()
+                
                 // Force refresh by triggering the query to re-execute
                 refreshTrigger += 1
+                
+                // Small delay to ensure data is cleared
+                try? await Task.sleep(nanoseconds: 500_000_000) // 0.5 seconds
                 
                 // Start syncing for new account
                 if conversations.isEmpty {

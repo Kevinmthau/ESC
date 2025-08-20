@@ -2,6 +2,7 @@ import Foundation
 
 struct MessageCleaner {
     static func cleanMessageBody(_ body: String) -> String {
+        // First trim all whitespace and newlines
         let cleanedBody = body.trimmingCharacters(in: .whitespacesAndNewlines)
         
         // Split into lines for processing
@@ -35,10 +36,15 @@ struct MessageCleaner {
         }
         
         // Join back together and trim
-        let result = cleanedLines.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
+        var result = cleanedLines.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
+        
+        // Remove any trailing newlines that might have been left
+        while result.hasSuffix("\n") {
+            result.removeLast()
+        }
         
         // Return original if cleaning resulted in empty string
-        return result.isEmpty ? body : result
+        return result.isEmpty ? body.trimmingCharacters(in: .whitespacesAndNewlines) : result
     }
     
     private static func isAttachmentLine(_ line: String) -> Bool {

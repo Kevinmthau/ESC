@@ -36,17 +36,6 @@ protocol DataSyncProtocol {
     var isSyncing: Bool { get }
 }
 
-// MARK: - Contacts Service Protocol
-protocol ContactsServiceProtocol {
-    var contacts: [(name: String, email: String)] { get }
-    var authorizationStatus: ContactsAuthorizationStatus { get }
-    
-    func requestAccess() async -> Bool
-    func fetchContacts() async
-    func getContactName(for email: String) -> String?
-    func getContactPhoto(for email: String) -> Data?
-    func searchContacts(query: String) -> [(name: String, email: String)]
-}
 
 enum ContactsAuthorizationStatus {
     case notDetermined
@@ -66,13 +55,6 @@ protocol StorageProtocol {
     func count(predicate: Predicate<Entity>?) throws -> Int
 }
 
-// MARK: - Message Parser Protocol
-protocol MessageParserProtocol {
-    func parseGmailMessage(_ message: GmailMessage, userEmail: String) -> Email?
-    func extractAttachments(from message: GmailMessage) -> [Attachment]
-    func cleanMessageBody(_ body: String) -> String
-    func extractReplyChain(from body: String) -> [String]
-}
 
 // MARK: - Authentication Manager Protocol
 protocol AuthenticationManagerProtocol {

@@ -2,7 +2,7 @@ import Foundation
 import SwiftData
 import Combine
 
-class GmailService: ObservableObject {
+class GmailService: ObservableObject, GmailServiceProtocol {
     private let authManager = GoogleAuthManager.shared
     private let apiClient = GmailAPIClient()
     private var cancellables = Set<AnyCancellable>()
@@ -51,7 +51,7 @@ class GmailService: ObservableObject {
         // Get user display name for sent messages
         let userDisplayName = try? await getUserDisplayName()
         
-        // Fetch message list first
+        // Fetch message list from INBOX only (not sent, drafts, etc.)
         let messageIds = try await apiClient.fetchMessageIds()
         
         // Fetch full messages

@@ -3,7 +3,7 @@ import SwiftData
 import Combine
 
 @MainActor
-class ConversationDetailViewModel: ObservableObject {
+class ConversationDetailViewModel: BaseDetailViewModel<Conversation> {
     // MARK: - Published Properties
     @Published var messageText = ""
     @Published var toRecipients: [String] = []
@@ -11,17 +11,15 @@ class ConversationDetailViewModel: ObservableObject {
     @Published var bccRecipients: [String] = []
     @Published var isSending = false
     @Published var selectedAttachments: [(filename: String, data: Data, mimeType: String)] = []
-    @Published var showingError = false
-    @Published var errorMessage = ""
     @Published var emails: [Email] = []
     @Published var replyingToEmail: Email?
     @Published var filteredContacts: [(name: String, email: String)] = []
     
     // MARK: - Properties
-    let conversation: Conversation
-    let gmailService: GmailService
+    var conversation: Conversation { item! }
+    let gmailService: GmailServiceProtocol
     let modelContext: ModelContext
-    let contactsService: ContactsService
+    let contactsService: ContactsServiceProtocol
     
     var conversationEmails: [Email] {
         emails.sorted { $0.timestamp < $1.timestamp }
@@ -33,13 +31,13 @@ class ConversationDetailViewModel: ObservableObject {
     
     // MARK: - Initialization
     init(conversation: Conversation, 
-         gmailService: GmailService,
+         gmailService: GmailServiceProtocol,
          modelContext: ModelContext,
-         contactsService: ContactsService = ContactsService.shared) {
-        self.conversation = conversation
+         contactsService: ContactsServiceProtocol = ContactsService.shared) {
         self.gmailService = gmailService
         self.modelContext = modelContext
         self.contactsService = contactsService
+        super.init(item: conversation)
         
         initializeRecipients()
     }
@@ -64,7 +62,7 @@ class ConversationDetailViewModel: ObservableObject {
         do {
             try modelContext.save()
         } catch {
-            handleError(error)
+            handleSendError(error)
         }
     }
     
@@ -79,7 +77,7 @@ class ConversationDetailViewModel: ObservableObject {
             await addEmailToConversation(email)
             clearComposer()
         } catch {
-            handleError(error)
+            handleSendError(error)
         }
     }
     
@@ -140,7 +138,7 @@ class ConversationDetailViewModel: ObservableObject {
             }
             emails = groupEmails
         } catch {
-            handleError(error)
+            handleSendError(error)
             emails = []
         }
     }
@@ -160,7 +158,7 @@ class ConversationDetailViewModel: ObservableObject {
             let fetchedEmails = try modelContext.fetch(descriptor)
             emails = deduplicateEmails(fetchedEmails)
         } catch {
-            handleError(error)
+            handleSendError(error)
             emails = []
         }
     }
@@ -189,13 +187,13 @@ class ConversationDetailViewModel: ObservableObject {
         
         if isNewConversation {
             guard !toRecipients.isEmpty else {
-                showError("Please add at least one recipient")
+                showErrorMessage("Please add at least one recipient")
                 return false
             }
             
             for recipient in toRecipients + ccRecipients + bccRecipients {
                 guard EmailValidator.isValid(recipient) else {
-                    showError("Invalid email address: \(recipient)")
+                    showErrorMessage("Invalid email address: \(recipient)")
                     return false
                 }
             }
@@ -227,6 +225,8 @@ class ConversationDetailViewModel: ObservableObject {
                 cc: ccRecipients,
                 bcc: bccRecipients,
                 body: bodyToSend,
+                subject: nil,
+                inReplyTo: nil,
                 attachments: selectedAttachments
             )
         }
@@ -322,7 +322,7 @@ class ConversationDetailViewModel: ObservableObject {
                 object: conversation
             )
         } catch {
-            handleError(error)
+            handleSendError(error)
         }
     }
     
@@ -453,7 +453,7 @@ class ConversationDetailViewModel: ObservableObject {
         }
         
         // Add address book contacts
-        for contact in contactsService.contacts {
+        for contact in contactsService.getAllContacts() {
             let email = contact.email.lowercased()
             if !seenEmails.contains(email) && !email.isEmpty {
                 allContacts.append(contact)
@@ -482,6 +482,11 @@ class ConversationDetailViewModel: ObservableObject {
     }
     
     private func fetchSubjectForEmail(_ email: Email) async -> String? {
+        // TODO: This method needs refactoring to work with the protocol
+        // For now, return the stored subject if available
+        return email.subject
+        
+        /*
         guard gmailService.isAuthenticated else { return nil }
         
         do {
@@ -500,6 +505,7 @@ class ConversationDetailViewModel: ObservableObject {
         }
         
         return nil
+        */
     }
     
     private func extractNameFromEmail(_ email: String) -> String {
@@ -517,13 +523,13 @@ class ConversationDetailViewModel: ObservableObject {
         return email
     }
     
-    private func handleError(_ error: Error) {
+    private func handleSendError(_ error: Error) {
         errorMessage = error.localizedDescription
-        showingError = true
+        showError = true
     }
     
-    private func showError(_ message: String) {
+    private func showErrorMessage(_ message: String) {
         errorMessage = message
-        showingError = true
+        showError = true
     }
 }

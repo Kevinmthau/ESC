@@ -36,9 +36,10 @@ xcodebuild test -project ESC.xcodeproj -scheme ESC -destination 'platform=iOS Si
 
 ### MVVM + Dependency Injection Pattern
 The app uses MVVM architecture with a centralized `DependencyContainer` for service management:
-- **ViewModels** (`ConversationDetailViewModel`, `ConversationListViewModel`): Handle business logic
-- **DependencyContainer**: Manages service instances and ViewModels creation
-- **Protocol-based services**: Enable testing and dependency inversion
+- **DependencyContainer** (`ESC/Core/DependencyContainer.swift`): @MainActor singleton managing all services and repositories
+- **ViewModels** (`ConversationDetailViewModel`, `ConversationListViewModel`): Handle business logic, created via DependencyContainer factory methods
+- **Protocol-based services**: All services implement protocols for testing and dependency inversion
+- **Repository Pattern**: `EmailRepository` and `ConversationRepository` abstract data access
 
 ### Data Models (SwiftData)
 - **Email**: Core model with critical fields:
@@ -115,13 +116,15 @@ let original = allEmails.first { $0.messageId == replyToId } ??
 
 #### Navigation Flow
 - ConversationListView → ConversationDetailView (push navigation)
-- Forward → ForwardComposeView (modal sheet)
+- Forward → ForwardComposeView (modal sheet with `SimpleRecipientsField`)
 - Reply → Inline in same conversation (no navigation)
 - New conversation → Empty Conversation object → ConversationDetailView
+- Email detail → OptimizedEmailReaderView (modal with HTMLEmailView)
 
-#### Compose UI Changes
+#### Compose UI Components
 - **New Messages**: Use `SimpleRecipientsField` (To field only, no CC/BCC)
 - **Replies**: Use `MultipleRecipientsField` (includes CC/BCC options)
+- **Forward**: Uses `SimpleRecipientsField` matching new message compose
 - Auto-focus To field when composing (0.3s delay for animation)
 
 #### Keyboard & Scrolling (ConversationDetailView)
@@ -130,6 +133,20 @@ let original = allEmails.first { $0.messageId == replyToId } ??
 - Automatic iOS keyboard avoidance (no manual keyboard height tracking)
 - Hidden scroll indicators for cleaner appearance
 - 50-point bottom spacer for better scroll behavior
+
+#### HTML Email Rendering (HTMLEmailView)
+- WKWebView with minimal CSS to preserve original email styling
+- Handles CID attachments via base64 data URLs
+- Remote images allowed by default (`blockRemoteImages: false`)
+- JavaScript enabled for layout fixes only
+- Responsive image/table handling without forcing fonts
+
+#### Timestamp Formatting
+- **Today**: Shows time only (e.g., "3:45 PM")
+- **Yesterday**: Shows "Yesterday"
+- **Past Week**: Shows day name (e.g., "Monday")
+- **Older**: Shows MM/dd/yy format
+- Implemented in `MessageBubbleView` and `ConversationRowView` via `formatTimestamp()` function
 
 ## Common Issues & Solutions
 
@@ -148,6 +165,10 @@ let original = allEmails.first { $0.messageId == replyToId } ??
 - Avoid manual keyboard height tracking
 - Remove conflicting scroll animations on focus changes
 
+### Forward Compose Scrolling
+**Problem**: Message scrolls to bottom when tapping text area in forward compose
+**Solution**: Remove nested ScrollView wrapper around TextEditor
+
 ### Build Cache Errors
 **Problem**: "disk I/O error" or "cannot open constant extraction protocol list"  
 **Solution**: Run `xcodebuild clean -project ESC.xcodeproj -scheme ESC`
@@ -159,6 +180,10 @@ let original = allEmails.first { $0.messageId == replyToId } ??
 ### Duplicate Messages
 **Problem**: Local and synced messages appear twice  
 **Solution**: 5-minute window duplicate detection in DataSyncService
+
+### Deprecated API Warnings
+**Problem**: `javaScriptEnabled` deprecated in iOS 14.0
+**Solution**: Use `configuration.defaultWebpagePreferences.allowsContentJavaScript` instead
 
 ## Gmail API Integration
 

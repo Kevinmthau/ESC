@@ -70,11 +70,43 @@ struct ConversationRowView: View {
             
             Spacer(minLength: 8)
             
-            Text(conversation.lastMessageTimestamp, style: .time)
+            Text(formatTimestamp(conversation.lastMessageTimestamp))
                 .font(.caption)
                 .foregroundColor(.secondary)
                 .fixedSize()
         }
+    }
+    
+    private func formatTimestamp(_ date: Date) -> String {
+        let calendar = Calendar.current
+        let now = Date()
+        
+        // Check if it's today
+        if calendar.isDateInToday(date) {
+            // Show time only (e.g., "3:45 PM")
+            let formatter = DateFormatter()
+            formatter.timeStyle = .short
+            formatter.dateStyle = .none
+            return formatter.string(from: date)
+        }
+        
+        // Check if it's yesterday
+        if calendar.isDateInYesterday(date) {
+            return "Yesterday"
+        }
+        
+        // Check if it's within the last week
+        if let daysAgo = calendar.dateComponents([.day], from: date, to: now).day, daysAgo < 7 {
+            // Show day of week (e.g., "Monday")
+            let formatter = DateFormatter()
+            formatter.dateFormat = "EEEE"
+            return formatter.string(from: date)
+        }
+        
+        // More than a week old - show mm/dd/yy
+        let formatter = DateFormatter()
+        formatter.dateFormat = "MM/dd/yy"
+        return formatter.string(from: date)
     }
     
     private var messagePreview: some View {

@@ -8,24 +8,46 @@ final class DependencyContainer: ObservableObject {
     static let shared = DependencyContainer()
     
     // MARK: - Services
-    private(set) lazy var gmailService: GmailService = {
+    private(set) lazy var gmailService: GmailServiceProtocol = {
         GmailService()
     }()
     
-    private(set) lazy var contactsService: ContactsService = {
+    private(set) lazy var contactsService: ContactsServiceProtocol = {
         ContactsService.shared
     }()
     
-    private(set) lazy var dataSyncService: DataSyncService = {
+    private(set) lazy var dataSyncService: DataSyncServiceProtocol = {
         DataSyncService(
             modelContext: modelContext,
-            gmailService: gmailService,
-            contactsService: contactsService
+            gmailService: gmailService as! GmailService,
+            contactsService: contactsService as! ContactsService
         )
     }()
     
     private(set) lazy var messageParserService: MessageParserService = {
         MessageParserService()
+    }()
+    
+    private(set) lazy var htmlSanitizerService: HTMLSanitizerProtocol = {
+        HTMLSanitizerService.shared
+    }()
+    
+    private(set) lazy var webViewPoolManager: WebViewPoolProtocol = {
+        WebViewPoolManager.shared
+    }()
+    
+    // MARK: - Repositories
+    private(set) lazy var emailRepository: EmailRepositoryProtocol = {
+        EmailRepository(modelContext: modelContext)
+    }()
+    
+    private(set) lazy var conversationRepository: ConversationRepositoryProtocol = {
+        ConversationRepository(modelContext: modelContext)
+    }()
+    
+    // MARK: - Coordinators
+    private(set) lazy var navigationCoordinator: NavigationCoordinator = {
+        NavigationCoordinator()
     }()
     
     // MARK: - Storage
@@ -66,13 +88,18 @@ final class DependencyContainer: ObservableObject {
         )
     }
     
-    func makeConversationListViewModel() -> ConversationListViewModel {
-        ConversationListViewModel(
+    func makeConversationListViewModel() -> ConversationListViewModelRefactored {
+        ConversationListViewModelRefactored(
+            conversationRepository: conversationRepository,
+            emailRepository: emailRepository,
             gmailService: gmailService,
-            modelContext: modelContext,
-            dataSyncService: dataSyncService
+            dataSyncService: dataSyncService,
+            navigationCoordinator: navigationCoordinator
         )
     }
+    
+    // MARK: - Service Protocols (for testing)
+    // These would need protocol conformance implementations in the actual services
     
     // MARK: - Configuration
     func configure() {
@@ -110,21 +137,49 @@ final class DependencyContainer: ObservableObject {
     private init() {}
 }
 
+// MARK: - Container Holder for Environment
+/// A holder that provides access to the DependencyContainer without directly referencing the MainActor-isolated shared instance
+struct DependencyContainerHolder {
+    @MainActor
+    var container: DependencyContainer {
+        DependencyContainer.shared
+    }
+}
+
 // MARK: - Environment Key
 struct DependencyContainerKey: EnvironmentKey {
-    static let defaultValue = DependencyContainer.shared
+    static let defaultValue = DependencyContainerHolder()
 }
 
 extension EnvironmentValues {
     var dependencies: DependencyContainer {
-        get { self[DependencyContainerKey.self] }
-        set { self[DependencyContainerKey.self] = newValue }
+        @MainActor get { 
+            self[DependencyContainerKey.self].container
+        }
+        set { 
+            // For setting, we need to wrap in a holder
+            // This is only used when explicitly setting via .environment
+            // which happens in MainActor context anyway
+            self[DependencyContainerKey.self] = DependencyContainerHolder()
+        }
     }
 }
 
 // MARK: - View Extension
 extension View {
-    func withDependencies(_ container: DependencyContainer = .shared) -> some View {
+    func withDependencies() -> some View {
+        self.modifier(DependencyContainerModifier())
+    }
+    
+    func withDependencies(_ container: DependencyContainer) -> some View {
         self.environment(\.dependencies, container)
+    }
+}
+
+// Helper modifier to access shared instance in MainActor context
+struct DependencyContainerModifier: ViewModifier {
+    @MainActor
+    func body(content: Content) -> some View {
+        content.environment(\.dependencies, DependencyContainer.shared)
     }
 }

@@ -36,7 +36,7 @@ struct ContactAvatarView: View {
     }
     
     private func loadContactPhoto() {
-        contactPhoto = contactsService.getContactPhoto(for: email)
+        contactPhoto = contactsService.getContactPhotoImage(for: email)
     }
 }
 

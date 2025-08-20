@@ -10,15 +10,26 @@ actor GmailAPIClient {
     
     // MARK: - Message Operations
     
-    func fetchMessageIds() async throws -> [String] {
-        guard let url = URL(string: "\(baseURL)/users/me/messages") else {
+    func fetchMessageIds(maxResults: Int = 50) async throws -> [String] {
+        // Only fetch messages from INBOX (excluding sent, drafts, etc.)
+        var components = URLComponents(string: "\(baseURL)/users/me/messages")
+        components?.queryItems = [
+            URLQueryItem(name: "labelIds", value: "INBOX"),
+            URLQueryItem(name: "maxResults", value: String(maxResults))
+        ]
+        
+        guard let url = components?.url else {
             throw GmailError.invalidURL
         }
         
+        print("📥 Fetching INBOX messages only (max: \(maxResults))")
         let request = try await createAuthenticatedRequest(url: url)
         let response = try await performRequest(request, responseType: MessageListResponse.self)
         
-        return response.messages?.map { $0.id } ?? []
+        let messageIds = response.messages?.map { $0.id } ?? []
+        print("✅ Found \(messageIds.count) messages in INBOX")
+        
+        return messageIds
     }
     
     func fetchMessage(messageId: String) async throws -> GmailMessage {

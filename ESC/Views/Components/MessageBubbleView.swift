@@ -63,7 +63,7 @@ struct MessageBubbleView: View {
             }
         }
         .fullScreenCover(isPresented: $showingEmailReader) {
-            EmailReaderView(email: email)
+            OptimizedEmailReaderView(email: email)
         }
     }
     
@@ -85,54 +85,102 @@ struct MessageBubbleView: View {
                 if !email.body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                     Group {
                         if let htmlBody = email.htmlBody, !htmlBody.isEmpty {
-                            // Check if this is a reply or marketing email
-                            if isLikelyReplyEmail() {
-                                // For replies, show the text with link detection
-                                let previewText = createPreviewText(from: email.body)
-                                if LinkDetector.containsLink(previewText) {
-                                    LinkedTextView(text: previewText, isFromMe: true)
-                                        .padding(.horizontal, 16)
-                                        .padding(.vertical, 10)
-                                        .background(Color.blue)
-                                        .clipShape(RoundedRectangle(cornerRadius: 18))
-                                } else {
-                                    Text(previewText)
-                                        .lineLimit(nil)
-                                        .multilineTextAlignment(.leading)
+                            // Use optimized HTML rendering with progressive enhancement
+                            let complexity = HTMLSanitizerService.shared.analyzeComplexity(htmlBody)
+                            
+                            if complexity == .simple && isLikelyReplyEmail() {
+                                // Simple HTML - use AttributedString for better performance
+                                if let attributedString = HTMLSanitizerService.shared.htmlToAttributedString(htmlBody, isFromMe: true) {
+                                    Text(AttributedString(attributedString))
                                         .padding(.horizontal, 16)
                                         .padding(.vertical, 10)
                                         .background(Color.blue)
                                         .foregroundColor(.white)
                                         .clipShape(RoundedRectangle(cornerRadius: 18))
+                                } else {
+                                    // Fallback to text preview
+                                    let previewText = createPreviewText(from: email.body)
+                                    if LinkDetector.containsLink(previewText) {
+                                        LinkedTextView(text: previewText, isFromMe: true)
+                                            .padding(.horizontal, 16)
+                                            .padding(.vertical, 10)
+                                            .background(Color.blue)
+                                            .clipShape(RoundedRectangle(cornerRadius: 18))
+                                    } else {
+                                        Text(previewText)
+                                            .lineLimit(nil)
+                                            .multilineTextAlignment(.leading)
+                                            .padding(.horizontal, 16)
+                                            .padding(.vertical, 10)
+                                            .background(Color.blue)
+                                            .foregroundColor(.white)
+                                            .clipShape(RoundedRectangle(cornerRadius: 18))
+                                    }
+                                }
+                            } else if complexity == .moderate || complexity == .complex {
+                                // For short messages, just show the text directly
+                                let messageLength = email.body.trimmingCharacters(in: .whitespacesAndNewlines).count
+                                // Increase threshold for showing inline - most business emails are under 500 chars
+                                // Don't show button for simple emails without tables
+                                if messageLength < 500 && !isForwardedMessage() && !email.body.contains("<table") {
+                                    // Short message - show directly without button
+                                    let previewText = createPreviewText(from: email.body)
+                                    if LinkDetector.containsLink(previewText) {
+                                        LinkedTextView(text: previewText, isFromMe: true)
+                                            .padding(.horizontal, 16)
+                                            .padding(.vertical, 10)
+                                            .background(Color.blue)
+                                            .clipShape(RoundedRectangle(cornerRadius: 18))
+                                    } else {
+                                        Text(previewText)
+                                            .lineLimit(nil)
+                                            .multilineTextAlignment(.leading)
+                                            .padding(.horizontal, 16)
+                                            .padding(.vertical, 10)
+                                            .background(Color.blue)
+                                            .foregroundColor(.white)
+                                            .clipShape(RoundedRectangle(cornerRadius: 18))
+                                    }
+                                } else {
+                                    // Complex HTML or long message - show preview with full reader button
+                                    Button(action: {
+                                        showingEmailReader = true
+                                    }) {
+                                        VStack(alignment: .leading, spacing: 6) {
+                                            Text(createPreviewText(from: email.body))
+                                                .lineLimit(5)
+                                                .multilineTextAlignment(.leading)
+                                                .fixedSize(horizontal: false, vertical: true)
+                                            
+                                            HStack(spacing: 4) {
+                                                Image(systemName: "doc.richtext.fill")
+                                                    .font(.caption)
+                                                Text("View full message")
+                                                    .font(.caption)
+                                                    .fontWeight(.medium)
+                                            }
+                                            .opacity(0.9)
+                                        }
+                                        .padding(.horizontal, 16)
+                                        .padding(.vertical, 12)
+                                        .frame(maxWidth: 280, alignment: .leading)
+                                        .background(Color.blue)
+                                        .foregroundColor(.white)
+                                        .clipShape(RoundedRectangle(cornerRadius: 18))
+                                    }
+                                    .buttonStyle(PlainButtonStyle())
                                 }
                             } else {
-                                // For marketing/newsletter emails, show preview with tap to expand
-                                Button(action: {
-                                    showingEmailReader = true
-                                }) {
-                                    VStack(alignment: .leading, spacing: 6) {
-                                        Text(createPreviewText(from: email.body))
-                                            .lineLimit(5)
-                                            .multilineTextAlignment(.leading)
-                                            .fixedSize(horizontal: false, vertical: true)
-                                        
-                                        HStack(spacing: 4) {
-                                            Image(systemName: "doc.richtext.fill")
-                                                .font(.caption)
-                                            Text("View full message")
-                                                .font(.caption)
-                                                .fontWeight(.medium)
-                                        }
-                                        .opacity(0.9)
-                                    }
-                                    .padding(.horizontal, 16)
-                                    .padding(.vertical, 12)
-                                    .frame(maxWidth: 280, alignment: .leading)
-                                    .background(Color.blue)
-                                    .foregroundColor(.white)
-                                    .clipShape(RoundedRectangle(cornerRadius: 18))
-                                }
-                                .buttonStyle(PlainButtonStyle())
+                                // Inline HTML rendering for moderate complexity
+                                OptimizedHTMLMessageView(
+                                    htmlContent: htmlBody,
+                                    isFromMe: true,
+                                    contentHeight: $htmlContentHeight
+                                )
+                                .frame(height: htmlContentHeight)
+                                .frame(maxWidth: 280)
+                                .background(Color.blue)
+                                .clipShape(RoundedRectangle(cornerRadius: 18))
                             }
                         } else {
                             // Render plain text with link detection
@@ -185,54 +233,102 @@ struct MessageBubbleView: View {
                 if !email.body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                     Group {
                         if let htmlBody = email.htmlBody, !htmlBody.isEmpty {
-                            // Check if this is a reply or marketing email
-                            if isLikelyReplyEmail() {
-                                // For replies, show the text with link detection
-                                let previewText = createPreviewText(from: email.body)
-                                if LinkDetector.containsLink(previewText) {
-                                    LinkedTextView(text: previewText, isFromMe: false)
-                                        .padding(.horizontal, 16)
-                                        .padding(.vertical, 10)
-                                        .background(Color(.systemGray5))
-                                        .clipShape(RoundedRectangle(cornerRadius: 18))
-                                } else {
-                                    Text(previewText)
-                                        .lineLimit(nil)
-                                        .multilineTextAlignment(.leading)
+                            // Use optimized HTML rendering with progressive enhancement
+                            let complexity = HTMLSanitizerService.shared.analyzeComplexity(htmlBody)
+                            
+                            if complexity == .simple && isLikelyReplyEmail() {
+                                // Simple HTML - use AttributedString for better performance
+                                if let attributedString = HTMLSanitizerService.shared.htmlToAttributedString(htmlBody, isFromMe: false) {
+                                    Text(AttributedString(attributedString))
                                         .padding(.horizontal, 16)
                                         .padding(.vertical, 10)
                                         .background(Color(.systemGray5))
                                         .foregroundColor(.primary)
                                         .clipShape(RoundedRectangle(cornerRadius: 18))
+                                } else {
+                                    // Fallback to text preview
+                                    let previewText = createPreviewText(from: email.body)
+                                    if LinkDetector.containsLink(previewText) {
+                                        LinkedTextView(text: previewText, isFromMe: false)
+                                            .padding(.horizontal, 16)
+                                            .padding(.vertical, 10)
+                                            .background(Color(.systemGray5))
+                                            .clipShape(RoundedRectangle(cornerRadius: 18))
+                                    } else {
+                                        Text(previewText)
+                                            .lineLimit(nil)
+                                            .multilineTextAlignment(.leading)
+                                            .padding(.horizontal, 16)
+                                            .padding(.vertical, 10)
+                                            .background(Color(.systemGray5))
+                                            .foregroundColor(.primary)
+                                            .clipShape(RoundedRectangle(cornerRadius: 18))
+                                    }
+                                }
+                            } else if complexity == .moderate || complexity == .complex {
+                                // For short messages, just show the text directly
+                                let messageLength = email.body.trimmingCharacters(in: .whitespacesAndNewlines).count
+                                // Increase threshold for showing inline - most business emails are under 500 chars
+                                // Don't show button for simple emails without tables
+                                if messageLength < 500 && !isForwardedMessage() && !email.body.contains("<table") {
+                                    // Short message - show directly without button
+                                    let previewText = createPreviewText(from: email.body)
+                                    if LinkDetector.containsLink(previewText) {
+                                        LinkedTextView(text: previewText, isFromMe: false)
+                                            .padding(.horizontal, 16)
+                                            .padding(.vertical, 10)
+                                            .background(Color(.systemGray5))
+                                            .clipShape(RoundedRectangle(cornerRadius: 18))
+                                    } else {
+                                        Text(previewText)
+                                            .lineLimit(nil)
+                                            .multilineTextAlignment(.leading)
+                                            .padding(.horizontal, 16)
+                                            .padding(.vertical, 10)
+                                            .background(Color(.systemGray5))
+                                            .foregroundColor(.primary)
+                                            .clipShape(RoundedRectangle(cornerRadius: 18))
+                                    }
+                                } else {
+                                    // Complex HTML or long message - show preview with full reader button
+                                    Button(action: {
+                                        showingEmailReader = true
+                                    }) {
+                                        VStack(alignment: .leading, spacing: 6) {
+                                            Text(createPreviewText(from: email.body))
+                                                .lineLimit(5)
+                                                .multilineTextAlignment(.leading)
+                                                .fixedSize(horizontal: false, vertical: true)
+                                            
+                                            HStack(spacing: 4) {
+                                                Image(systemName: "doc.richtext.fill")
+                                                    .font(.caption)
+                                                Text("View full message")
+                                                    .font(.caption)
+                                                    .fontWeight(.medium)
+                                            }
+                                            .opacity(0.8)
+                                        }
+                                        .padding(.horizontal, 16)
+                                        .padding(.vertical, 12)
+                                        .frame(maxWidth: 280, alignment: .leading)
+                                        .background(Color(.systemGray5))
+                                        .foregroundColor(.primary)
+                                        .clipShape(RoundedRectangle(cornerRadius: 18))
+                                    }
+                                    .buttonStyle(PlainButtonStyle())
                                 }
                             } else {
-                                // For marketing/newsletter emails, show preview with tap to expand
-                                Button(action: {
-                                    showingEmailReader = true
-                                }) {
-                                    VStack(alignment: .leading, spacing: 6) {
-                                        Text(createPreviewText(from: email.body))
-                                            .lineLimit(5)
-                                            .multilineTextAlignment(.leading)
-                                            .fixedSize(horizontal: false, vertical: true)
-                                        
-                                        HStack(spacing: 4) {
-                                            Image(systemName: "doc.richtext.fill")
-                                                .font(.caption)
-                                            Text("View full message")
-                                                .font(.caption)
-                                                .fontWeight(.medium)
-                                        }
-                                        .opacity(0.8)
-                                    }
-                                    .padding(.horizontal, 16)
-                                    .padding(.vertical, 12)
-                                    .frame(maxWidth: 280, alignment: .leading)
-                                    .background(Color(.systemGray5))
-                                    .foregroundColor(.primary)
-                                    .clipShape(RoundedRectangle(cornerRadius: 18))
-                                }
-                                .buttonStyle(PlainButtonStyle())
+                                // Inline HTML rendering for moderate complexity
+                                OptimizedHTMLMessageView(
+                                    htmlContent: htmlBody,
+                                    isFromMe: false,
+                                    contentHeight: $htmlContentHeight
+                                )
+                                .frame(height: htmlContentHeight)
+                                .frame(maxWidth: 280)
+                                .background(Color(.systemGray5))
+                                .clipShape(RoundedRectangle(cornerRadius: 18))
                             }
                         } else {
                             // Render plain text with link detection
@@ -283,12 +379,59 @@ struct MessageBubbleView: View {
     }
     
     private var timestampView: some View {
-        Text(email.timestamp, style: .time)
+        Text(formatTimestamp(email.timestamp))
             .font(.caption2)
             .foregroundColor(.secondary)
     }
     
+    private func formatTimestamp(_ date: Date) -> String {
+        let calendar = Calendar.current
+        let now = Date()
+        
+        // Check if it's today
+        if calendar.isDateInToday(date) {
+            // Show time only (e.g., "3:45 PM")
+            let formatter = DateFormatter()
+            formatter.timeStyle = .short
+            formatter.dateStyle = .none
+            return formatter.string(from: date)
+        }
+        
+        // Check if it's yesterday
+        if calendar.isDateInYesterday(date) {
+            return "Yesterday"
+        }
+        
+        // Check if it's within the last week
+        if let daysAgo = calendar.dateComponents([.day], from: date, to: now).day, daysAgo < 7 {
+            // Show day of week (e.g., "Monday")
+            let formatter = DateFormatter()
+            formatter.dateFormat = "EEEE"
+            return formatter.string(from: date)
+        }
+        
+        // More than a week old - show mm/dd/yy
+        let formatter = DateFormatter()
+        formatter.dateFormat = "MM/dd/yy"
+        return formatter.string(from: date)
+    }
+    
     private func createPreviewText(from body: String) -> String {
+        // First check if this is primarily a URL (like a tracking link)
+        let trimmedBody = body.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmedBody.hasPrefix("http://") || trimmedBody.hasPrefix("https://") {
+            // This is likely a marketing email with a tracking URL
+            // Try to extract meaningful text from the URL or use subject
+            if let subject = email.subject, !subject.isEmpty {
+                return subject
+            }
+            // Extract domain name as fallback
+            if let url = URL(string: trimmedBody), let host = url.host {
+                return "Link from \(host)"
+            }
+            return "View message content"
+        }
+        
         // Check if this is a forwarded message
         let bodyLower = body.lowercased()
         let isForwarded = bodyLower.contains("---------- forwarded message") || 
@@ -422,7 +565,8 @@ struct MessageBubbleView: View {
         }
         
         // Short emails are likely simple replies
-        if email.body.count < 500 {
+        // Increased from 500 to 800 to handle typical business emails
+        if email.body.count < 800 {
             return true
         }
         

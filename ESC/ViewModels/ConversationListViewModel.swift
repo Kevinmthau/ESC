@@ -116,12 +116,8 @@ class ConversationListViewModel: ObservableObject {
     }
     
     func signOut() async {
-        do {
-            try await gmailService.signOut()
-            clearAllData()
-        } catch {
-            handleError(AppError.custom("Failed to sign out: \(error.localizedDescription)"))
-        }
+        gmailService.signOut()
+        clearAllData()
     }
     
     // MARK: - Private Methods

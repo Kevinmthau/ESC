@@ -8,47 +8,29 @@ final class DependencyContainer: ObservableObject {
     static let shared = DependencyContainer()
     
     // MARK: - Services
-    private(set) lazy var gmailService: GmailServiceProtocol = {
-        GmailService()
-    }()
+    private(set) lazy var gmailService = GmailService()
     
-    private(set) lazy var contactsService: ContactsServiceProtocol = {
-        ContactsService.shared
-    }()
+    private(set) lazy var contactsService = ContactsService.shared
     
-    private(set) lazy var dataSyncService: DataSyncServiceProtocol = {
-        DataSyncService(
-            modelContext: modelContext,
-            gmailService: gmailService as! GmailService,
-            contactsService: contactsService as! ContactsService
-        )
-    }()
+    private(set) lazy var dataSyncService = DataSyncService(
+        modelContext: modelContext,
+        gmailService: gmailService,
+        contactsService: contactsService
+    )
     
-    private(set) lazy var messageParserService: MessageParserService = {
-        MessageParserService()
-    }()
+    private(set) lazy var messageParserService = MessageParserService()
     
-    private(set) lazy var htmlSanitizerService: HTMLSanitizerProtocol = {
-        HTMLSanitizerService.shared
-    }()
+    private(set) lazy var htmlSanitizerService = HTMLSanitizerService.shared
     
-    private(set) lazy var webViewPoolManager: WebViewPoolProtocol = {
-        WebViewPoolManager.shared
-    }()
+    private(set) lazy var webViewPoolManager = WebViewPoolManager.shared
     
     // MARK: - Repositories
-    private(set) lazy var emailRepository: EmailRepositoryProtocol = {
-        EmailRepository(modelContext: modelContext)
-    }()
+    private(set) lazy var emailRepository = EmailRepository(modelContext: modelContext)
     
-    private(set) lazy var conversationRepository: ConversationRepositoryProtocol = {
-        ConversationRepository(modelContext: modelContext)
-    }()
+    private(set) lazy var conversationRepository = ConversationRepository(modelContext: modelContext)
     
     // MARK: - Coordinators
-    private(set) lazy var navigationCoordinator: NavigationCoordinator = {
-        NavigationCoordinator()
-    }()
+    private(set) lazy var navigationCoordinator = NavigationCoordinator()
     
     // MARK: - Storage
     private(set) lazy var modelContainer: ModelContainer = {
@@ -88,13 +70,11 @@ final class DependencyContainer: ObservableObject {
         )
     }
     
-    func makeConversationListViewModel() -> ConversationListViewModelRefactored {
-        ConversationListViewModelRefactored(
-            conversationRepository: conversationRepository,
-            emailRepository: emailRepository,
+    func makeConversationListViewModel() -> ConversationListViewModel {
+        ConversationListViewModel(
             gmailService: gmailService,
-            dataSyncService: dataSyncService,
-            navigationCoordinator: navigationCoordinator
+            modelContext: modelContext,
+            dataSyncService: dataSyncService
         )
     }
     

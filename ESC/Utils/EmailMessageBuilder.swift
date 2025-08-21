@@ -133,14 +133,14 @@ struct EmailMessageBuilder {
         let fromEmail = extractEmailAddress(from: from)
         
         guard EmailValidator.isValid(fromEmail) else {
-            throw GmailError.invalidMessageFormat
+            throw AppError.invalidEmailFormat
         }
         
         // Validate all To recipients
         for recipient in to {
             let toEmail = extractEmailAddress(from: recipient)
             guard EmailValidator.isValid(toEmail) else {
-                throw GmailError.invalidRecipient
+                throw AppError.invalidEmail(recipient)
             }
         }
         
@@ -148,7 +148,7 @@ struct EmailMessageBuilder {
         for recipient in cc {
             let ccEmail = extractEmailAddress(from: recipient)
             guard EmailValidator.isValid(ccEmail) else {
-                throw GmailError.invalidRecipient
+                throw AppError.invalidEmail(recipient)
             }
         }
         
@@ -156,12 +156,12 @@ struct EmailMessageBuilder {
         for recipient in bcc {
             let bccEmail = extractEmailAddress(from: recipient)
             guard EmailValidator.isValid(bccEmail) else {
-                throw GmailError.invalidRecipient
+                throw AppError.invalidEmail(recipient)
             }
         }
         
         guard !body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-            throw GmailError.invalidMessageFormat
+            throw AppError.invalidEmailFormat
         }
     }
     

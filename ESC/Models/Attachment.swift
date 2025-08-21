@@ -8,6 +8,7 @@ final class Attachment: @unchecked Sendable {
     var mimeType: String
     var size: Int
     var data: Data?
+    var contentId: String?
     var email: Email?
     
     init(
@@ -15,13 +16,15 @@ final class Attachment: @unchecked Sendable {
         filename: String,
         mimeType: String,
         size: Int,
-        data: Data? = nil
+        data: Data? = nil,
+        contentId: String? = nil
     ) {
         self.id = id
         self.filename = filename
         self.mimeType = mimeType
         self.size = size
         self.data = data
+        self.contentId = contentId
     }
     
     var isImage: Bool {

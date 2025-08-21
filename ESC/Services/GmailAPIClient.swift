@@ -167,10 +167,6 @@ actor GmailAPIClient {
                 throw NetworkError.invalidResponse
             }
             
-        } catch let error as GmailError {
-            throw error
-        } catch let error as NetworkError {
-            throw error
         } catch {
             throw NetworkError.unknown(error)
         }

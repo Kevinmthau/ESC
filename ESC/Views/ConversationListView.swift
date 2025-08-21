@@ -5,7 +5,7 @@ struct ConversationListView: View {
     @Environment(\.modelContext) private var modelContext
     @Query(sort: \Conversation.lastMessageTimestamp, order: .reverse) 
     private var allConversations: [Conversation]
-    @StateObject private var gmailService = DependencyContainer.shared.gmailService as! GmailService
+    @StateObject private var gmailService = DependencyContainer.shared.gmailService
     @EnvironmentObject private var contactsService: ContactsService
     @State private var syncService: DataSyncService?
     @State private var showingAuth = false
